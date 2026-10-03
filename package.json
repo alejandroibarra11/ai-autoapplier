@@ -1,0 +1,13 @@
+{
+  "name": "ai-autoapplier",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "worker": "pnpm --filter @autoapplier/worker start",
+    "once": "pnpm --filter @autoapplier/worker once",
+    "web": "pnpm --filter @autoapplier/web dev",
+    "db:generate": "pnpm --filter @autoapplier/core db:generate"
+  }
+}
