@@ -1,0 +1,25 @@
+# deps / build
+node_modules/
+dist/
+.next/
+.turbo/
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# personal data — never public
+profile/*
+!profile/*.example.*
+!profile/README.md
+data/
+*.db
+*.db-journal
+*.sqlite
+screenshots/
+output/
+
+# misc
+.DS_Store
+*.log
