@@ -23,3 +23,6 @@ output/
 # misc
 .DS_Store
 *.log
+
+# agent scratch
+.superpowers/
