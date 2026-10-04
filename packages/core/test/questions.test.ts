@@ -12,6 +12,11 @@ describe('parseGreenhouseQuestions', () => {
   it('marks identity and file fields as identity', () => {
     expect(qs.find((q) => q.label === 'First Name')?.type).toBe('identity');
     expect(qs.find((q) => q.label === 'Resume/CV')?.type).toBe('identity');
+    expect(qs.find((q) => q.label === 'Resume/CV')?.required).toBe(true);
+  });
+  it('skips questions with no fields', () => {
+    const out = parseGreenhouseQuestions({ questions: [{ label: 'Empty', required: false, fields: [] }, { label: 'Q', required: false, fields: [{ name: 'question_1', type: 'input_text' }] }] });
+    expect(out.map((q) => q.id)).toEqual(['question_1']);
   });
   it('maps selects with option labels', () => {
     const sp = qs.find((q) => /sponsorship/i.test(q.label))!;
@@ -40,6 +45,16 @@ describe('normalizeFormFields', () => {
     ]);
     expect(qs.map((q) => q.type)).toEqual(['identity', 'identity', 'identity', 'text', 'textarea', 'select', 'boolean']);
     expect(qs[5]!.options).toEqual(['Yes', 'No']);
+  });
+  it('does not swallow real questions as identity', () => {
+    const qs = normalizeFormFields([
+      { name: 'location', label: 'Location', tag: 'input', inputType: 'text', required: false },
+      { name: 'employer', label: 'Name of your current employer', tag: 'input', inputType: 'text', required: false },
+      { name: 'optin', label: 'Email me about future roles', tag: 'input', inputType: 'checkbox', required: false },
+      { name: 'referrer_email', label: "Referrer's email", tag: 'input', inputType: 'email', required: false },
+      { name: 'portfolio_file', label: 'Portfolio (PDF)', tag: 'input', inputType: 'file', required: false },
+    ]);
+    expect(qs.map((q) => q.type)).toEqual(['text', 'text', 'boolean', 'text', 'file']);
   });
   it('drops hidden/unnamed duplicates', () => {
     expect(normalizeFormFields([

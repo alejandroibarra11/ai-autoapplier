@@ -17,7 +17,7 @@ function ghType(f: GhField): QuestionType {
 export function parseGreenhouseQuestions(raw: unknown): FormQuestion[] {
   const qs = (raw as { questions?: unknown })?.questions;
   if (!Array.isArray(qs)) throw new Error('greenhouse questions: unexpected response shape');
-  return (qs as GhQuestion[]).map((q) => {
+  return (qs as GhQuestion[]).filter((q) => Array.isArray(q.fields) && q.fields.length > 0).map((q) => {
     const f = q.fields[0]!;
     const type = q.fields.some((x) => IDENTITY.has(x.name)) ? 'identity' : ghType(f);
     const options = f.values?.length ? f.values.map((v) => v.label) : undefined;
