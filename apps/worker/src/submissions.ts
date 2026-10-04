@@ -198,6 +198,14 @@ export function handleCancel(
   return { ok: true, text: '✋ Cancelled — nothing was sent' };
 }
 
+/** After ✋ Cancel: the phase 2 copy-paste messages for the job (📨 Mark applied / ⏭ Skip), so it can be finished by hand. */
+export async function sendReadyAfterCancel(sender: DraftSender, chatId: string, db: Db, jobId: number): Promise<void> {
+  const job = getJob(db, jobId);
+  const draft = latestDraft(db, jobId);
+  if (!job || job.status !== 'needs_manual' || !draft) return;
+  await sendReady(sender, chatId, job, draft);
+}
+
 export interface SubmitTapResult { ok: boolean; text: string; start?: () => Promise<void> }
 
 /**

@@ -10,7 +10,7 @@ import { handleDraftAction } from '../src/drafts';
 import { escapeHtml } from '../src/telegram';
 import {
   createSubmitTaps, formatFillCard, handleCancel, notifySubmissions, parseSubmitCallback, photoFits, reportSubmitResult,
-  sendReadyUnlessAutoFill, submitAndReport, type SubmissionSender,
+  sendReadyAfterCancel, sendReadyUnlessAutoFill, submitAndReport, type SubmissionSender,
 } from '../src/submissions';
 
 const dir = mkdtempSync(join(tmpdir(), 'aa-subs-'));
@@ -229,6 +229,22 @@ describe('handleCancel', () => {
   it('refused from ready_to_apply', () => {
     const { db, id } = setup({ status: 'ready_to_apply' });
     expect(handleCancel(db, '42', 42, id)).toEqual({ ok: false, text: 'Already ready_to_apply' });
+  });
+  it('after a successful cancel the copy-paste messages are sent (with 📨 Mark applied / ⏭ Skip)', async () => {
+    const { db, id } = setup();
+    expect(handleCancel(db, '42', 42, id).ok).toBe(true);
+    const { calls, sender } = recorder();
+    await sendReadyAfterCancel(sender, '42', db, id);
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((c) => c.type === 'msg')).toBe(true);
+    expect(calls.map((c) => c.text).join('\n')).toContain('Dear Acme');
+    expect(kb(calls.at(-1)!)).toContain(`ma:${id}`);
+  });
+  it('sendReadyAfterCancel sends nothing unless the job is in needs_manual after a cancel', async () => {
+    const { db, id } = setup();
+    const { calls, sender } = recorder();
+    await sendReadyAfterCancel(sender, '42', db, id); // still awaiting_submit
+    expect(calls).toEqual([]);
   });
 });
 

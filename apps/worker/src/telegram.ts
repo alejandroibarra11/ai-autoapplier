@@ -108,6 +108,8 @@ export async function notifyPending(
 export interface BotOptions {
   /** 🚀 Submit tap handler (see createSubmitTaps). Without it Submit taps are refused. */
   submitTap?: (fromChatId: string | number | undefined, jobId: number, cardDry: boolean | null) => SubmitTapResult;
+  /** Runs after a successful ✋ Cancel (main: sends the copy-paste messages). */
+  onCancelled?: (jobId: number) => Promise<void>;
 }
 
 export function createBot(token: string, chatId: string, db: Db, onReady?: (jobId: number) => Promise<void>, opts: BotOptions = {}): Bot {
@@ -120,6 +122,7 @@ export function createBot(token: string, chatId: string, db: Db, onReady?: (jobI
       const r = handleCancel(db, chatId, ctx.chat?.id, sc.jobId);
       await ctx.answerCallbackQuery({ text: r.text });
       if (r.ok) await ctx.editMessageReplyMarkup({ reply_markup: markAppliedKeyboard(sc.jobId) }).catch(() => {});
+      if (r.ok && opts.onCancelled) await opts.onCancelled(sc.jobId).catch((e) => console.error('[telegram] copy-paste after cancel failed', e));
       return;
     }
     if (sc?.action === 'submit') {

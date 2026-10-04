@@ -9,7 +9,7 @@ import { createBrowserHolder, createLogThrottle } from './browser-holder';
 import { createDraftLoop, createFailureWatch } from './draft-loop';
 import { notifyDraftFailures, notifyDrafts } from './drafts';
 import { createMutex } from './mutex';
-import { createSubmitTaps, notifySubmissions, sendReadyUnlessAutoFill, submitAndReport, type SubmissionSender } from './submissions';
+import { createSubmitTaps, notifySubmissions, sendReadyAfterCancel, sendReadyUnlessAutoFill, submitAndReport, type SubmissionSender } from './submissions';
 import { bootstrap } from './bootstrap';
 import { createDailyGate, logSummary, runPipelineOnce } from './pipeline';
 import { createBot, type MessageSender } from './telegram';
@@ -32,7 +32,10 @@ const submitTap = createSubmitTaps(app.db, chatId ?? '', app.cfg.submit.dryRun, 
 }));
 const bot = createBot(telegramToken, chatId ?? '', app.db, async (jobId) => {
   if (chatId) await sendReadyUnlessAutoFill(draftSender, chatId, app.db, jobId);
-}, { submitTap });
+}, {
+  submitTap,
+  onCancelled: async (jobId) => { if (chatId) await sendReadyAfterCancel(draftSender, chatId, app.db, jobId); },
+});
 const draftSender: SubmissionSender = {
   sendMessage: (c, t, o) => bot.api.sendMessage(c, t, o as never),
   sendDocument: (c, p, caption, o) => bot.api.sendDocument(c, new InputFile(p), { caption, ...(o as object) }),
