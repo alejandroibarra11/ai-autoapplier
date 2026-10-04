@@ -21,9 +21,10 @@ function withoutBoardMetadata(description: string): string {
   return description.split('\n').filter((l) => !l.trimStart().startsWith(BOARD_METADATA_PREFIX)).join('\n');
 }
 
-/** Text the eligibility quote is checked against: Location line + description, minus synthetic board metadata. */
-export function evidenceText(job: Pick<JobRow, 'locationText' | 'description'>): string {
-  return `${job.locationText ? `Location: ${job.locationText}\n\n` : ''}${truncatedDescription(withoutBoardMetadata(job.description))}`;
+/** Text the eligibility quote is checked against: employer-written title, Location line and description, minus synthetic board metadata. */
+export function evidenceText(job: Pick<JobRow, 'title' | 'locationText' | 'description'>): string {
+  const location = job.locationText ? `Location: ${job.locationText}\n\n` : '';
+  return `${job.title}\n${location}${truncatedDescription(withoutBoardMetadata(job.description))}`;
 }
 
 export function jobContextText(job: ContextJob): string {
@@ -52,7 +53,7 @@ The candidate lives in Mexico, is NOT authorized to work in the US, and can only
 - likely: fully remote with no stated country restriction and nothing implying US-only.
 - unlikely: signals of US-only without saying so (US benefits like 401k/health insurance, US payroll, list of US states) or remote limited to another region (e.g. Europe-only, Canada-only).
 - ineligible: explicitly requires US work authorization, residence, citizenship, clearance, W-2, on-site/hybrid work, or a non-Americas region only.
-eligibilityEvidence MUST be an exact quote copied character-for-character from the posting text (the Location line counts) that supports the decision. At most ~200 characters. Never paraphrase. For eligible, the quote must explicitly name the allowed region or arrangement (Mexico, LATAM, the Americas, worldwide/anywhere, international contractors). For likely, you may quote the Location line. If no quote supports eligible or likely, answer unlikely.
+eligibilityEvidence MUST be an exact quote copied character-for-character from the posting text (the title and Location line count) that supports the decision. At most ~200 characters. Never paraphrase. For eligible, the quote must explicitly name the allowed region or arrangement (Mexico, LATAM, the Americas, worldwide/anywhere, international contractors). For likely, you may quote the Location line. If no quote supports eligible or likely, answer unlikely.
 
 FIT
 fitScore 0-100 = how strong this candidate would look to the hiring manager, using only facts in the profile. 80+ strong match on core stack and seniority; 60-79 solid with gaps; below 60 weak. Penalize hard requirements the candidate lacks (e.g. 8+ years, PhD, specific domain).

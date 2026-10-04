@@ -10,7 +10,7 @@ const MIN_FRAGMENT = 6;
 export function evidenceFound(evidence: string, text: string): boolean {
   const hay = normalizeForMatch(text);
   const cleaned = evidence.trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, '');
-  const fragments = cleaned.split(/\s*(?:\.\.\.|…)\s*/).map(normalizeForMatch).filter(Boolean);
+  const fragments = cleaned.split(/\s*(?:\.\.\.|…|\n)\s*/).map(normalizeForMatch).filter(Boolean);
   if (fragments.length === 0) return false;
   let pos = 0;
   for (const f of fragments) {

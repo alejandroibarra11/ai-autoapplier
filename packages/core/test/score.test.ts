@@ -38,6 +38,14 @@ describe('evidenceFound', () => {
   });
 });
 
+describe('evidenceFound multi-line quotes', () => {
+  it('treats line breaks in a quote as in-order fragments', () => {
+    const text = 'Location: Mexico\n\nAbout us\nLocation: Remote - Anywhere in LATAM';
+    expect(evidenceFound('Location: Mexico\n\nLocation: Remote - Anywhere in LATAM', text)).toBe(true);
+    expect(evidenceFound('Location: Remote - Anywhere in LATAM\nLocation: Mexico', text)).toBe(false);
+  });
+});
+
 describe('applyEvidenceCheck / decide', () => {
   it('downgrades eligible with invented evidence', () => {
     const s = applyEvidenceCheck({ ...base, eligibilityEvidence: 'Mexico welcome' }, 'Remote - US only');
@@ -58,9 +66,10 @@ describe('applyEvidenceCheck / decide', () => {
 });
 
 describe('evidenceText', () => {
-  it('excludes synthetic header lines', () => {
-    const text = evidenceText(makeJob());
-    expect(evidenceFound('Title: Senior AI Engineer', text)).toBe(false);
+  it('accepts the employer-written title but excludes synthetic header lines', () => {
+    const text = evidenceText(makeJob({ title: 'Sr Full Stack Developer - ONLY MEXICO' }));
+    expect(evidenceFound('Sr Full Stack Developer - ONLY MEXICO', text)).toBe(true);
+    expect(evidenceFound('Company: Acme', text)).toBe(false);
     expect(evidenceFound('Compensation: not stated', text)).toBe(false);
     expect(evidenceFound('Location: Remote - LATAM', text)).toBe(true);
     expect(evidenceFound('Location: not stated', evidenceText({ ...makeJob(), locationText: '' }))).toBe(false);
