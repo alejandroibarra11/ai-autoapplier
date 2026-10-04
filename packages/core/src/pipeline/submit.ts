@@ -23,6 +23,11 @@ export type SubmitRunResult =
   | { status: 'dry_run' | 'applied' | 'submit_failed' | 'needs_manual'; reason?: string; shot: string | null };
 
 const DEFAULT_CONFIRM_MS = 30_000;
+const FORM_REJECTED_PREFIX = 'The form rejected the submission: ';
+/** submit_failed reason for a click the form answered with a validation error (it stayed on the form). */
+export const formRejectedReason = (evidence: string) => `${FORM_REJECTED_PREFIX}${evidence.slice(0, 400)} — nothing was sent; finish manually`;
+/** True for a formRejectedReason (messages then skip the "check your email" advice). */
+export const isFormRejected = (reason: string | null | undefined): boolean => !!reason?.startsWith(FORM_REJECTED_PREFIX);
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 500);
 
 /**
@@ -107,6 +112,7 @@ export async function runSubmit(d: SubmitDeps, jobId: number): Promise<SubmitRun
       return { status: 'applied', shot: after };
     }
     // Never assume success: captcha, an error, or no confirmation are all failures.
+    if (outcome.kind === 'error') return end('submit_failed', formRejectedReason(outcome.evidence), after);
     return end('submit_failed', `${outcome.kind}: ${outcome.evidence}`.slice(0, 500), after);
   } catch (e) {
     const s = (await safeShot(page, shotPath(d.shotsDir, jobId, clicked ? 'submit' : 'presubmit'))) ?? shot;

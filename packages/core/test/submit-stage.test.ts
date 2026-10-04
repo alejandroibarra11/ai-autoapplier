@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { existsSync } from 'node:fs';
 import { chromium, type Browser, type Page } from 'playwright';
 import { runFill } from '../src/pipeline/fill';
-import { runSubmit, type SubmitDeps } from '../src/pipeline/submit';
+import { isFormRejected, runSubmit, type SubmitDeps } from '../src/pipeline/submit';
 import { claimStatus, getJob, insertSubmission, listEvents, latestSubmission, setStatus, updateSubmission } from '../src/db/repo';
 import type { Config } from '../src/config';
 import type { LLMProvider } from '../src/llm/provider';
@@ -167,6 +167,19 @@ describe('runSubmit', () => {
     expect(sub.result).toBe('failed');
     expect(sub.evidence).toContain('unknown');
     expect(sub.submittedAt).not.toBeNull(); // the click happened: it counts against the limits
+  }, 90_000);
+
+  it('the form shows a validation error after the click → submit_failed with "the form rejected the submission" wording', async () => {
+    const r = await filledJob();
+    state.html = fixture('greenhouse-form.html').replace('</body>', '<script>document.addEventListener("submit", (e) => { e.preventDefault(); e.stopPropagation(); document.body.insertAdjacentHTML("afterbegin", \'<div role="alert">Email is required</div>\'); }, true);</script></body>');
+    const out = await runSubmit(sdeps(r, live, { confirmTimeoutMs: 5000 }), r.jobId);
+    const reason = 'The form rejected the submission: Email is required — nothing was sent; finish manually';
+    expect(out).toMatchObject({ status: 'submit_failed', reason });
+    expect(isFormRejected(reason)).toBe(true);
+    expect(isFormRejected('unknown: no confirmation')).toBe(false);
+    expect(getJob(r.db, r.jobId)!.status).toBe('submit_failed');
+    expect(latestSubmission(r.db, r.jobId)).toMatchObject({ result: 'failed', evidence: reason });
+    expect(latestSubmission(r.db, r.jobId)!.submittedAt).not.toBeNull(); // still counts against the limits
   }, 90_000);
 
   it('refuses jobs that are not awaiting_submit or whose latest submission is not a verified fill', async () => {

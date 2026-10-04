@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { InlineKeyboard } from 'grammy';
 import {
-  claimStatus, fillSummary, getJob, latestDraft, latestSubmission, listUnnotifiedSubmissions, pngSize, STALE_SUBMIT_NOTE, updateSubmission,
+  claimStatus, fillSummary, getJob, isFormRejected, latestDraft, latestSubmission, listUnnotifiedSubmissions, pngSize, STALE_SUBMIT_NOTE, updateSubmission,
   type Config, type Db, type JobRow, type SubmissionRow, type SubmitRunResult,
 } from '@autoapplier/core';
 import { sendReady, type DraftSender } from './drafts';
@@ -119,6 +119,11 @@ async function sendManual(sender: SubmissionSender, chatId: string, db: Db, job:
   if (draft) await sendReady(sender, chatId, job, draft).catch((e) => console.error(`[telegram] copy-paste messages failed for job #${job.id}:`, errMsg(e)));
 }
 
+/** submit_failed headline: a form-rejected reason already says nothing was sent; otherwise advise checking email. */
+const failedHeadline = (job: JobRow, reason: string) => (isFormRejected(reason)
+  ? `⚠️ ${esc(reason, 600)} — ${jobName(job)}`
+  : `⚠️ ${esc(reason, 600)} — finish manually (check your email first: it may have been sent) — ${jobName(job)}`);
+
 const staleText = (job: JobRow) =>
   `⚠️ The worker restarted while submitting ${jobName(job)} — check your email; if it went through tap 📨 Mark applied.`;
 
@@ -136,7 +141,7 @@ async function notifyOne(sender: SubmissionSender, chatId: string, db: Db, cfg: 
     if (sub.evidence === STALE_SUBMIT_NOTE) {
       await sender.sendMessage(chatId, staleText(job), { ...html(markAppliedKeyboard(job.id)), link_preview_options: { is_disabled: true } });
     } else {
-      await sendManual(sender, chatId, db, job, `⚠️ ${esc(sub.evidence ?? 'submit failed', 600)} — finish manually (check your email first: it may have been sent) — ${jobName(job)}`, sub.submitShot ?? sub.fillShot);
+      await sendManual(sender, chatId, db, job, failedHeadline(job, sub.evidence ?? 'submit failed'), sub.submitShot ?? sub.fillShot);
     }
     return true;
   }
@@ -259,10 +264,10 @@ export async function reportSubmitResult(
     await sendWithShot(sender, chatId, r.shot, `✅ Applied — ${esc(job.company, 200)}`);
   } else if (r.status === 'dry_run') {
     await sendWithShot(sender, chatId, r.shot, `${DRY_RUN_RESULT}\n${jobName(job)}`, submitKeyboard(jobId, true));
+  } else if (r.status === 'submit_failed') {
+    await sendManual(sender, chatId, db, job, failedHeadline(job, r.reason ?? 'submit failed'), r.shot);
   } else {
-    const reason = esc(r.reason ?? (r.status === 'submit_failed' ? 'submit failed' : 'needs manual'), 600);
-    const extra = r.status === 'submit_failed' ? ' (check your email first: it may have been sent)' : '';
-    await sendManual(sender, chatId, db, job, `⚠️ ${reason} — finish manually${extra} — ${jobName(job)}`, r.shot);
+    await sendManual(sender, chatId, db, job, `⚠️ ${esc(r.reason ?? 'needs manual', 600)} — finish manually — ${jobName(job)}`, r.shot);
   }
   const sub = latestSubmission(db, jobId);
   if (sub && !sub.notifiedAt) updateSubmission(db, sub.id, { notifiedAt: now });

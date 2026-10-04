@@ -1,4 +1,4 @@
-import { fillSummary, type JobRow, type SubmissionRow } from '@autoapplier/core';
+import { fillSummary, isFormRejected, type JobRow, type SubmissionRow } from '@autoapplier/core';
 import { cancelSubmission, markApplied, skipJob } from './actions';
 import { SubmitForm } from './submit-form';
 
@@ -50,7 +50,7 @@ export function SubmitPanel({ job, sub, dryRun }: { job: JobRow; sub: Submission
       )}
       {(job.status === 'needs_manual' || job.status === 'submit_failed') && (
         <form action={markApplied.bind(null, job.id)} style={{ marginTop: 12 }}>
-          {job.status === 'submit_failed' && <p className="muted">Check your email first: the application may have been sent.</p>}
+          {job.status === 'submit_failed' && !isFormRejected(sub.evidence) && <p className="muted">Check your email first: the application may have been sent.</p>}
           <button>📨 Mark applied</button>
         </form>
       )}

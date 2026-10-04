@@ -362,6 +362,27 @@ describe('reportSubmitResult', () => {
       expect(calls.some((c) => kb(c).includes(`ma:${id}`))).toBe(true);
     }
   });
+  it('a form-rejected submit_failed says nothing was sent (no "check your email"), live and on re-send', async () => {
+    const reason = 'The form rejected the submission: Email is required — nothing was sent; finish manually';
+    const { db, id } = setup({ status: 'submit_failed', result: 'failed', evidence: reason });
+    const { calls, sender } = recorder();
+    await reportSubmitResult(sender, '42', db, cfg(true), id, { status: 'submit_failed', reason, shot: png(800, 1600) });
+    expect(calls[0]!.text).toContain(`⚠️ ${reason} — Voice`);
+    expect(calls.map((c) => c.text).join('\n')).not.toMatch(/check your email/i);
+    const again = setup({ status: 'submit_failed', result: 'failed', evidence: reason });
+    const r2 = recorder();
+    await notifySubmissions(r2.sender, '42', again.db, cfg(true), { delay: async () => {} });
+    expect(r2.calls[0]!.text).toContain(`⚠️ ${reason} — Voice`);
+    expect(r2.calls.map((c) => c.text).join('\n')).not.toMatch(/check your email/i);
+  });
+  it('unknown / captcha submit_failed keep the "check your email" wording', async () => {
+    for (const reason of ['unknown: no confirmation', 'captcha: challenge after click']) {
+      const { db, id } = setup({ status: 'submit_failed', result: 'failed', evidence: reason });
+      const { calls, sender } = recorder();
+      await reportSubmitResult(sender, '42', db, cfg(true), id, { status: 'submit_failed', reason, shot: png(800, 1600) });
+      expect(calls[0]!.text).toContain('check your email first');
+    }
+  });
   it('marks the latest submission notified so the loop does not repeat it', async () => {
     const { db, id, subId } = setup();
     updateSubmission(db, subId!, { result: 'dry_run' });
