@@ -155,6 +155,20 @@ export function updateDraftContent(db: Db, draftId: number, c: { coverLetter: st
   db.update(drafts).set({ ...c, editedByUser: true, updatedAt: now }).where(eq(drafts.id, draftId)).run();
 }
 
+/**
+ * Saves fill-time answers into the draft (replacing any answer to the same question) so a re-fill reuses them instead
+ * of calling the LLM again. Not a user edit: `editedByUser` is left alone.
+ */
+export function appendDraftAnswers(db: Db, draftId: number, add: DraftAnswer[], now = new Date()): void {
+  if (add.length === 0) return;
+  db.transaction((tx) => {
+    const cur = tx.select({ answers: drafts.answers }).from(drafts).where(eq(drafts.id, draftId)).get();
+    if (!cur) throw new Error(`draft ${draftId} not found`);
+    const ids = new Set(add.map((a) => a.questionId));
+    tx.update(drafts).set({ answers: [...cur.answers.filter((a) => !ids.has(a.questionId)), ...add], updatedAt: now }).where(eq(drafts.id, draftId)).run();
+  });
+}
+
 export function markDraftNotified(db: Db, draftId: number, now = new Date()): void {
   db.update(drafts).set({ notifiedAt: now }).where(eq(drafts.id, draftId)).run();
 }

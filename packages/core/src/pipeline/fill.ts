@@ -7,10 +7,11 @@ import type { Answers } from '../answers';
 import type { ApplyTarget, DraftAnswer } from '../apply/types';
 import { targetFromUrl } from '../apply/resolve';
 import {
-  type JobRow, claimStatus, getJob, insertSubmission, latestDraft, latestSubmission, listJobsForFilling, listStaleByStatus, recordUsage, setStatus, updateSubmission,
+  type JobRow, appendDraftAnswers, claimStatus, getJob, insertSubmission, latestDraft, latestSubmission, listJobsForFilling, listStaleByStatus, recordUsage, setStatus,
+  spendSince, updateSubmission,
 } from '../db/repo';
 import { costUsd, type LLMProvider } from '../llm/provider';
-import { draftJob, isBlockingFlag } from '../draft/draft';
+import { answerMissing, isBlockingFlag } from '../draft/draft';
 import { buildFillPlan } from '../submit/plan';
 import { verifyFill } from '../submit/verify';
 import { detectCaptchaChallenge, detectLoginWall } from '../submit/detect';
@@ -24,6 +25,8 @@ export interface PageFactory { newPage(): Promise<Page> }
 export interface FillDeps {
   db: Db; cfg: Config; provider: LLMProvider; profile: Profile; answers: Answers; shotsDir: string;
   pages: PageFactory; now?: Date; limit?: number; onlyJobId?: number;
+  /** Timeout for the fill-time LLM step (default FILL_LLM_TIMEOUT_MS), separate from submit.fillTimeoutMs. */
+  llmTimeoutMs?: number;
   /** Skip the stale filling/submitting sweep (the CLI: another process may own those jobs). Default false. */
   skipStaleSweep?: boolean;
   /** Test seam: runs after a job is picked and before it is claimed. */
@@ -80,10 +83,25 @@ export function resetStaleFillSubmit(db: Db, olderThan: Date, now = new Date()):
 
 interface FillCtx { page: Page | null; plan: FillPlan; done: boolean }
 type Outcome = { kind: 'filled'; plan: FillPlan; shot: string | null } | { kind: 'manual'; plan: FillPlan; reasons: string[]; shot: string | null };
+type Prepared = { kind: 'ready'; plan: FillPlan; target: ApplyTarget } | Extract<Outcome, { kind: 'manual' }>;
 
-/** Builds the plan (with fill-time answers) and fills the form. Writes nothing to the job/submission tables. */
-async function fillJob(d: FillDeps, job: JobRow, filler: AtsFiller, now: Date, ctx: FillCtx): Promise<Outcome> {
-  const manual = (reasons: string[], shot: string | null = null): Outcome => ({ kind: 'manual', plan: ctx.plan, reasons, shot });
+export const FILL_LLM_TIMEOUT_MS = 90_000;
+export const SPEND_CAP_REASON = 'daily AI spend cap reached';
+
+/** Draft + fill LLM spend since the start of the UTC day of `now`. */
+function draftingSpendToday(db: Db, now: Date): number {
+  const dayStart = new Date(now);
+  dayStart.setUTCHours(0, 0, 0, 0);
+  return spendSince(db, dayStart, 'draft') + spendSince(db, dayStart, 'fill');
+}
+
+/**
+ * Builds the plan. Required questions the draft lacks are answered by the LLM (answers only, own timeout, before any
+ * page is opened, subject to the daily drafting spend cap) and saved into the draft marked `fillTime`, so a re-fill
+ * reuses them. Writes nothing to the job/submission tables.
+ */
+async function prepareFill(d: FillDeps, job: JobRow, now: Date, ctx: FillCtx): Promise<Prepared> {
+  const manual = (reasons: string[]): Prepared => ({ kind: 'manual', plan: ctx.plan, reasons, shot: null });
   const target = jobTarget(job);
   if (!target) return manual([`cannot build the ${job.resolvedKind} form URL from ${job.resolvedApplyUrl ?? '(none)'}`]);
   const draft = latestDraft(d.db, job.id);
@@ -93,22 +111,31 @@ async function fillJob(d: FillDeps, job: JobRow, filler: AtsFiller, now: Date, c
   let plan = buildFillPlan({ ...input, draft });
   ctx.plan = plan;
   if (plan.missingRequired.length) {
+    if (draftingSpendToday(d.db, now) >= d.cfg.drafting.dailySpendCapUsd) return manual([SPEND_CAP_REASON]);
     const ids = new Set(plan.missingRequired.map((m) => m.fieldId));
-    const res = await draftJob({
+    const llmMs = d.llmTimeoutMs ?? FILL_LLM_TIMEOUT_MS;
+    const res = await withTimeout(answerMissing({
       provider: d.provider, model: d.cfg.drafting.model, effort: d.cfg.drafting.effort,
       profile: d.profile, answers: d.answers, job, questions: draft.questions.filter((q) => ids.has(q.id)),
       onUsage: (u) => recordUsage(d.db, { jobId: job.id, stage: 'fill', ...u, costUsd: costUsd(d.cfg.pricing, u) }, now),
-    });
-    const extra: DraftAnswer[] = res.answers.filter((a) => ids.has(a.questionId));
-    plan = buildFillPlan({ ...input, draft: { ...draft, answers: [...draft.answers.filter((a) => !ids.has(a.questionId)), ...extra] } });
-    plan = { ...plan, entries: plan.entries.map((e) => (ids.has(e.fieldId) ? { ...e, source: 'fill_time' as const } : e)) };
+    }), llmMs, 'fill-time answers');
+    const extra: DraftAnswer[] = res.answers.filter((a) => ids.has(a.questionId)).map((a) => ({ ...a, source: 'generated', fillTime: true }));
+    const withExtra = [...draft.answers.filter((a) => !ids.has(a.questionId)), ...extra];
+    plan = buildFillPlan({ ...input, draft: { ...draft, answers: withExtra } });
     ctx.plan = plan;
     const blocking = res.flags.filter(isBlockingFlag);
     if (blocking.length) return manual(blocking);
+    // Only clean answers are kept: a blocked one must not be filled silently by a later re-fill.
+    appendDraftAnswers(d.db, draft.id, extra, now);
   }
   const reasons = [...plan.manualReasons, ...plan.missingRequired.map((m) => `missing answer: ${m.label}`)];
   if (reasons.length) return manual(reasons);
+  return { kind: 'ready', plan, target };
+}
 
+/** Opens the form and fills it from `plan` (the browser step; timed by the caller with submit.fillTimeoutMs). */
+async function browserFill(d: FillDeps, job: JobRow, filler: AtsFiller, target: ApplyTarget, plan: FillPlan, ctx: FillCtx): Promise<Outcome> {
+  const manual = (reasons: string[], shot: string | null = null): Outcome => ({ kind: 'manual', plan, reasons, shot });
   const page = await d.pages.newPage();
   if (ctx.done) { await page.close().catch(() => {}); throw new Error('fill abandoned'); }
   ctx.page = page;
@@ -140,11 +167,13 @@ export async function runFill(d: FillDeps): Promise<FillRunResult> {
     const ctx: FillCtx = { page: null, plan: EMPTY_PLAN, done: false };
     let out: Outcome;
     try {
-      out = await withTimeout(fillJob(d, job, filler, now, ctx), d.cfg.submit.fillTimeoutMs, 'fill');
+      // The LLM step (own timeout) runs before any page is opened; only the browser step uses fillTimeoutMs.
+      const prep = await prepareFill(d, job, now, ctx);
+      out = prep.kind === 'manual' ? prep : await withTimeout(browserFill(d, job, filler, prep.target, prep.plan, ctx), d.cfg.submit.fillTimeoutMs, 'fill');
     } catch (e) {
       out = { kind: 'manual', plan: ctx.plan, reasons: [errMsg(e)], shot: await safeShot(ctx.page, shotPath(d.shotsDir, job.id, 'fill')) };
     } finally {
-      ctx.done = true; // a timed-out fillJob keeps running in the background: it must not open another page
+      ctx.done = true; // a timed-out browserFill keeps running in the background: it must not open another page
       await ctx.page?.close().catch(() => {});
     }
     try {

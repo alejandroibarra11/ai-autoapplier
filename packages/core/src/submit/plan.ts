@@ -68,7 +68,7 @@ export function buildFillPlan(input: FillPlanInput): FillPlan {
       if (q.required) missingRequired.push({ fieldId: q.id, label: q.label });
       continue;
     }
-    entries.push({ fieldId: q.id, label: q.label, kind: KIND[q.type] ?? 'text', value: a.answer, source: a.source === 'answers' ? 'answers' : 'draft', required: q.required, ...(q.options ? { options: q.options } : {}) });
+    entries.push({ fieldId: q.id, label: q.label, kind: KIND[q.type] ?? 'text', value: a.answer, source: a.fillTime ? 'fill_time' : a.source === 'answers' ? 'answers' : 'draft', required: q.required, ...(q.options ? { options: q.options } : {}) });
   }
   return { entries, missingRequired, manualReasons };
 }
