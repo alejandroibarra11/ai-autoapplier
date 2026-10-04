@@ -109,7 +109,7 @@ if (cmd === 'once') {
     try {
       const r = await runFill({
         db: app.db, cfg: app.cfg, provider: createProvider(app.cfg.drafting.provider), profile: app.profile, answers: app.answers,
-        shotsDir: join(app.root, 'data/screenshots'), pages: { newPage: () => session.context.newPage() }, onlyJobId: id,
+        shotsDir: join(app.root, 'data/screenshots'), pages: { newPage: () => session.context.newPage() }, onlyJobId: id, skipStaleSweep: true,
       });
       console.log(r);
       const sub = latestSubmission(app.db, id);

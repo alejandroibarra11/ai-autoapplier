@@ -9,7 +9,7 @@ import { createBrowserHolder, createLogThrottle } from './browser-holder';
 import { createDraftLoop, createFailureWatch } from './draft-loop';
 import { notifyDraftFailures, notifyDrafts } from './drafts';
 import { createMutex } from './mutex';
-import { createSubmitTaps, notifySubmissions, reportSubmitResult, sendReadyUnlessAutoFill, type SubmissionSender } from './submissions';
+import { createSubmitTaps, notifySubmissions, sendReadyUnlessAutoFill, submitAndReport, type SubmissionSender } from './submissions';
 import { bootstrap } from './bootstrap';
 import { createDailyGate, logSummary, runPipelineOnce } from './pipeline';
 import { createBot, type MessageSender } from './telegram';
@@ -26,11 +26,10 @@ const holder = createBrowserHolder(() => openBrowser({ headless: app.cfg.browser
 const pages: PageFactory = { newPage: async () => (await holder.get()).context.newPage() };
 
 // The ONLY production path to runSubmit in the worker: the user's chat-gated 🚀 Submit tap.
-const submitTap = createSubmitTaps(app.db, chatId ?? '', async (jobId) => {
-  const r = await browserLock(() => runSubmit({ db: app.db, cfg: app.cfg, profile: app.profile, answers: app.answers, shotsDir, pages }, jobId));
-  console.log(`[submit] job #${jobId}: ${r.status}${'reason' in r && r.reason ? ` (${r.reason})` : ''}`);
-  if (chatId) await reportSubmitResult(draftSender, chatId, app.db, jobId, r).catch((e) => console.error(`[submit] result message failed for job #${jobId}`, e));
-});
+const submitTap = createSubmitTaps(app.db, chatId ?? '', app.cfg.submit.dryRun, (jobId) => submitAndReport({
+  sender: draftSender, chatId, db: app.db, cfg: app.cfg, jobId,
+  submit: () => browserLock(() => runSubmit({ db: app.db, cfg: app.cfg, profile: app.profile, answers: app.answers, shotsDir, pages }, jobId)),
+}));
 const bot = createBot(telegramToken, chatId ?? '', app.db, async (jobId) => {
   if (chatId) await sendReadyUnlessAutoFill(draftSender, chatId, app.db, jobId);
 }, { submitTap });

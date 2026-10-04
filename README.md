@@ -36,7 +36,7 @@ Do these in order:
 4. `cp profile/answers.example.yaml profile/answers.yaml` and fill it in (the service will not start without it).
 5. `systemctl --user restart ai-autoapplier` — this applies the DB migrations. Do it BEFORE opening the dashboard (the dashboard does not migrate the DB).
 6. Heads-up: jobs that are already `shortlisted` will be drafted (and billed against `drafting.dailySpendCapUsd`) within about a minute of the restart.
-7. Approving from the dashboard does not send the Telegram "ready to apply" message; the dashboard itself shows the apply link and the answers. Approve from Telegram if you want the ready message there.
+7. Approving from the dashboard does not send the Telegram "ready to apply" message; the dashboard itself shows the apply link and the answers. Approve from Telegram if you want the ready message there. Exception (phase 3): Greenhouse, Lever and Ashby jobs never get the copy-paste message on approval, from either place; the fill loop sends a Telegram screenshot card with 🚀 Submit / ✋ Cancel instead (or "finish manually" + the copy-paste messages if it can't fill the form).
 
 Manual draft for one job in status awaiting_review, shortlisted, draft_ready or draft_failed (no Telegram; uses its own browser profile `data/browser-cli`, so it can run while the service is up):
 
@@ -48,7 +48,7 @@ For Greenhouse, Lever and Ashby postings the worker fills the employer's form in
 
 Flow: Approve a draft -> the worker (60 s loop) opens the form, fills it from your profile, `answers.yaml` and the approved draft, attaches the CV and takes a full-page screenshot -> Telegram gets the screenshot with the field count, any answers it had to generate at fill time (marked ⚠️, check them) and 🚀 Submit / ✋ Cancel -> 🚀 Submit re-fills the form from the same plan, checks it again and clicks submit -> "✅ Applied — <company>" with the confirmation screenshot. Other ATSs keep the phase 2 copy-paste flow (Approve sends the "ready to apply" message).
 
-Dry run is ON by default (`submit.dryRun: true` in `config.yaml`): 🚀 Submit does everything except the click and replies "🧪 Dry run — nothing was sent." with the Submit/Cancel buttons again. Do a few dry runs, then set `submit.dryRun: false` and restart the service (`systemctl --user restart ai-autoapplier`). Do the first real submission with you watching: pick a job you really want, tap 🚀 Submit and check the confirmation screenshot and your email.
+Dry run is ON by default (`submit.dryRun: true` in `config.yaml`): 🚀 Submit does everything except the click and replies "🧪 Dry run — nothing was sent." with the Submit/Cancel buttons again. Do a few dry runs, then set `submit.dryRun: false` and restart the service (`systemctl --user restart ai-autoapplier`). After switching dry run off, old dry-run cards won't submit — the bot re-fills and sends a fresh card. Do the first real submission with you watching: pick a job you really want, tap 🚀 Submit and check the confirmation screenshot and your email.
 
 Limits (`config.yaml` `submit`): at most one real submission every `minSecondsBetween` (120 s) and `dailyLimit` (15) per UTC day; dry runs don't count. Over the limit, Submit is refused and nothing is clicked. `fillTimeoutMs` bounds one fill.
 

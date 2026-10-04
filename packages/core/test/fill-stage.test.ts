@@ -113,6 +113,18 @@ describe('runFill', () => {
     expect(getJob(a.db, b.jobId)!.status).toBe('awaiting_submit');
   }, 90_000);
 
+  it('skipStaleSweep leaves stale filling/submitting jobs alone (cli fill)', async () => {
+    const r = readyJob({ now });
+    const s = readyJob({ db: r.db, now });
+    const t = readyJob({ db: r.db, now });
+    setStatus(r.db, s.jobId, 'submitting', null, {}, min(20));
+    setStatus(r.db, t.jobId, 'filling', null, {}, min(20));
+    const res = await runFill(deps(r, { onlyJobId: r.jobId, skipStaleSweep: true }));
+    expect(res.filled).toBe(1);
+    expect(getJob(r.db, s.jobId)!.status).toBe('submitting');
+    expect(getJob(r.db, t.jobId)!.status).toBe('filling');
+  }, 90_000);
+
   it('resets a stale filling job and fills it; a stale submitting job becomes submit_failed', async () => {
     const r = readyJob({ now });
     setStatus(r.db, r.jobId, 'filling', null, {}, min(20));

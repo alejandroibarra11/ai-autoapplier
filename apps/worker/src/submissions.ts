@@ -4,7 +4,7 @@ import {
   claimStatus, getJob, latestDraft, latestSubmission, listUnnotifiedSubmissions, pngSize, STALE_SUBMIT_NOTE, updateSubmission,
   type Config, type Db, type JobRow, type SubmissionRow, type SubmitRunResult,
 } from '@autoapplier/core';
-import { sendReady, truncate, type DraftSender } from './drafts';
+import { sendReady, type DraftSender } from './drafts';
 import { escapeHtml } from './telegram';
 
 export interface SubmissionSender extends DraftSender {
@@ -21,10 +21,26 @@ const DRY_RUN_RESULT = '🧪 Dry run — nothing was sent. Turn off submit.dryRu
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const html = (reply_markup?: InlineKeyboard) => ({ parse_mode: 'HTML' as const, ...(reply_markup ? { reply_markup } : {}) });
-const jobName = (job: JobRow) => `${escapeHtml(truncate(job.title, 200))} — ${escapeHtml(truncate(job.company, 200))}`;
+/** HTML-escapes `text` and cuts it so the ESCAPED result (incl. the trailing …) is at most `max` chars; never splits an entity. */
+export function esc(text: string, max: number): string {
+  const full = escapeHtml(text);
+  if (full.length <= max) return full;
+  let out = '';
+  for (const ch of Array.from(text)) {
+    const e = escapeHtml(ch);
+    if (out.length + e.length > max - 1) break;
+    out += e;
+  }
+  return `${out}…`;
+}
+const jobName = (job: JobRow) => `${esc(job.title, 150)} — ${esc(job.company, 100)}`;
 
-export function submitKeyboard(jobId: number): InlineKeyboard {
-  return new InlineKeyboard().text('🚀 Submit', `su:${jobId}`).text('✋ Cancel', `ca:${jobId}`);
+/**
+ * 🚀 Submit / ✋ Cancel. The submit data carries the mode the card was rendered under (`su:<id>:d` dry, `su:<id>:r` real)
+ * so a card shown in one mode can never submit in the other.
+ */
+export function submitKeyboard(jobId: number, dryRun: boolean): InlineKeyboard {
+  return new InlineKeyboard().text('🚀 Submit', `su:${jobId}:${dryRun ? 'd' : 'r'}`).text('✋ Cancel', `ca:${jobId}`);
 }
 
 export function markAppliedKeyboard(jobId: number): InlineKeyboard {
@@ -39,7 +55,7 @@ function fillCardParts(job: JobRow, sub: SubmissionRow, dryRun: boolean): { head
   if (dryRun) head.push(DRY_RUN_BANNER);
   const fillTime = entries.filter((e) => e.source === 'fill_time');
   const details = fillTime.slice(0, MAX_FILL_TIME_LISTED)
-    .map((e) => `⚠️ ${escapeHtml(truncate(e.label, 80))}: ${escapeHtml(truncate(e.value, 300))}`);
+    .map((e) => `⚠️ ${esc(e.label, 80)}: ${esc(e.value, 300)}`);
   if (fillTime.length > MAX_FILL_TIME_LISTED) details.push(`…and ${fillTime.length - MAX_FILL_TIME_LISTED} more fill-time answers (dashboard /jobs/${job.id})`);
   return { head, details };
 }
@@ -85,9 +101,9 @@ async function sendWithShot(sender: SubmissionSender, chatId: string, shot: stri
 /** The fill card with Submit/Cancel; details go in a follow-up message when the caption would pass 1024 chars. */
 async function sendFillCard(sender: SubmissionSender, chatId: string, job: JobRow, sub: SubmissionRow, dryRun: boolean, shot: string | null): Promise<void> {
   const full = formatFillCard(job, sub, dryRun);
-  if (full.length <= CAPTION_LIMIT) { await sendWithShot(sender, chatId, shot, full, submitKeyboard(job.id)); return; }
+  if (full.length <= CAPTION_LIMIT) { await sendWithShot(sender, chatId, shot, full, submitKeyboard(job.id, dryRun)); return; }
   const { head, details } = fillCardParts(job, sub, dryRun);
-  await sendWithShot(sender, chatId, shot, [...head, '(fill-time answers below)'].join('\n'), submitKeyboard(job.id));
+  await sendWithShot(sender, chatId, shot, [...head, '(fill-time answers below)'].join('\n'), submitKeyboard(job.id, dryRun));
   await sender.sendMessage(chatId, details.join('\n'), html()).catch((e) => console.error(`[telegram] fill details failed for job #${job.id}:`, errMsg(e)));
 }
 
@@ -95,7 +111,8 @@ async function sendFillCard(sender: SubmissionSender, chatId: string, job: JobRo
 async function sendManual(sender: SubmissionSender, chatId: string, db: Db, job: JobRow, headline: string, shot: string | null): Promise<void> {
   const draft = latestDraft(db, job.id);
   await sendWithShot(sender, chatId, shot, headline, draft ? undefined : markAppliedKeyboard(job.id));
-  if (draft) await sendReady(sender, chatId, job, draft);
+  // The headline is what counts as delivered: a copy-paste failure must not re-send it next loop.
+  if (draft) await sendReady(sender, chatId, job, draft).catch((e) => console.error(`[telegram] copy-paste messages failed for job #${job.id}:`, errMsg(e)));
 }
 
 const staleText = (job: JobRow) =>
@@ -108,20 +125,19 @@ async function notifyOne(sender: SubmissionSender, chatId: string, db: Db, cfg: 
     return true;
   }
   if (sub.result === 'blocked' && job.status === 'needs_manual') {
-    const why = truncate(sub.evidence ?? 'unknown reason', 600);
-    await sendManual(sender, chatId, db, job, `⚠️ Finish manually — ${jobName(job)}: ${escapeHtml(why)}`, sub.submitShot ?? sub.fillShot);
+    await sendManual(sender, chatId, db, job, `⚠️ Finish manually — ${jobName(job)}: ${esc(sub.evidence ?? 'unknown reason', 600)}`, sub.submitShot ?? sub.fillShot);
     return true;
   }
   if (sub.result === 'failed' && job.status === 'submit_failed') {
     if (sub.evidence === STALE_SUBMIT_NOTE) {
       await sender.sendMessage(chatId, staleText(job), { ...html(markAppliedKeyboard(job.id)), link_preview_options: { is_disabled: true } });
     } else {
-      await sendManual(sender, chatId, db, job, `⚠️ ${escapeHtml(truncate(sub.evidence ?? 'submit failed', 600))} — finish manually (check your email first: it may have been sent) — ${jobName(job)}`, sub.submitShot ?? sub.fillShot);
+      await sendManual(sender, chatId, db, job, `⚠️ ${esc(sub.evidence ?? 'submit failed', 600)} — finish manually (check your email first: it may have been sent) — ${jobName(job)}`, sub.submitShot ?? sub.fillShot);
     }
     return true;
   }
   if (sub.result === 'submitted' && job.status === 'applied') {
-    await sendWithShot(sender, chatId, sub.submitShot, `✅ Applied — ${escapeHtml(truncate(job.company, 200))}`);
+    await sendWithShot(sender, chatId, sub.submitShot, `✅ Applied — ${esc(job.company, 200)}`);
     return true;
   }
   return false;
@@ -152,10 +168,12 @@ export async function notifySubmissions(
   return sent;
 }
 
-export function parseSubmitCallback(data: string): { action: 'submit' | 'cancel'; jobId: number } | null {
-  const m = /^(su|ca):(\d+)$/.exec(data);
+/** `cardDry`: the mode the card was rendered under; null for cancel and for a legacy `su:<id>` (unknown mode). */
+export function parseSubmitCallback(data: string): { action: 'submit' | 'cancel'; jobId: number; cardDry: boolean | null } | null {
+  const m = /^(?:su:(\d+)(?::([dr]))?|ca:(\d+))$/.exec(data);
   if (!m) return null;
-  return { action: m[1] === 'su' ? 'submit' : 'cancel', jobId: Number(m[2]) };
+  if (m[3] !== undefined) return { action: 'cancel', jobId: Number(m[3]), cardDry: null };
+  return { action: 'submit', jobId: Number(m[1]), cardDry: m[2] === undefined ? null : m[2] === 'd' };
 }
 
 const allowed = (allowedChatId: string, fromChatId: string | number | undefined) =>
@@ -183,14 +201,22 @@ export interface SubmitTapResult { ok: boolean; text: string; start?: () => Prom
  * runs `run(jobId)` (the caller wraps runSubmit in the browser mutex and reports the result); the caller answers the
  * callback and removes the keyboard before starting it. runSubmit's atomic claim is the final guard.
  */
-export function createSubmitTaps(db: Db, allowedChatId: string, run: (jobId: number) => Promise<void>) {
+export function createSubmitTaps(db: Db, allowedChatId: string, dryRun: boolean, run: (jobId: number) => Promise<void>) {
   const inFlight = new Set<number>();
-  return (fromChatId: string | number | undefined, jobId: number): SubmitTapResult => {
+  return (fromChatId: string | number | undefined, jobId: number, cardDry: boolean | null): SubmitTapResult => {
     if (!allowed(allowedChatId, fromChatId)) return { ok: false, text: 'Not allowed' };
     const job = getJob(db, jobId);
     if (!job) return { ok: false, text: 'Job not found' };
     if (inFlight.has(jobId)) return { ok: false, text: '⏳ Already submitting' };
     if (job.status !== 'awaiting_submit') return { ok: false, text: `Already ${job.status}` };
+    if (cardDry !== dryRun) {
+      // The card was shown under another dry-run setting (or its mode is unknown): never submit from it. Re-fill so
+      // the fill loop sends a fresh card under the current mode.
+      if (!claimStatus(db, jobId, 'awaiting_submit', 'ready_to_apply', 'mode changed: re-fill')) {
+        return { ok: false, text: `Already ${getJob(db, jobId)?.status ?? job.status}` };
+      }
+      return { ok: true, text: 'Mode changed — sending a fresh screenshot' };
+    }
     inFlight.add(jobId);
     let started: Promise<void> | null = null;
     return {
@@ -209,23 +235,55 @@ export function createSubmitTaps(db: Db, allowedChatId: string, run: (jobId: num
 }
 
 /** Tells the user what a 🚀 Submit tap did. */
-export async function reportSubmitResult(sender: SubmissionSender, chatId: string, db: Db, jobId: number, r: SubmitRunResult, now = new Date()): Promise<void> {
+export async function reportSubmitResult(
+  sender: SubmissionSender, chatId: string, db: Db, cfg: SubmitCfg, jobId: number, r: SubmitRunResult, now = new Date(),
+): Promise<void> {
   const job = getJob(db, jobId);
   if (!job) return;
   if (r.status === 'refused') {
     const stillWaiting = job.status === 'awaiting_submit';
-    await sender.sendMessage(chatId, `⛔ ${escapeHtml(truncate(r.reason, 1000))} — ${jobName(job)}`, html(stillWaiting ? submitKeyboard(jobId) : undefined));
+    await sender.sendMessage(chatId, `⛔ ${esc(r.reason, 1000)} — ${jobName(job)}`, html(stillWaiting ? submitKeyboard(jobId, cfg.submit.dryRun) : undefined));
   } else if (r.status === 'applied') {
-    await sendWithShot(sender, chatId, r.shot, `✅ Applied — ${escapeHtml(truncate(job.company, 200))}`);
+    await sendWithShot(sender, chatId, r.shot, `✅ Applied — ${esc(job.company, 200)}`);
   } else if (r.status === 'dry_run') {
-    await sendWithShot(sender, chatId, r.shot, `${DRY_RUN_RESULT}\n${jobName(job)}`, submitKeyboard(jobId));
+    await sendWithShot(sender, chatId, r.shot, `${DRY_RUN_RESULT}\n${jobName(job)}`, submitKeyboard(jobId, true));
   } else {
-    const reason = truncate(r.reason ?? (r.status === 'submit_failed' ? 'submit failed' : 'needs manual'), 600);
+    const reason = esc(r.reason ?? (r.status === 'submit_failed' ? 'submit failed' : 'needs manual'), 600);
     const extra = r.status === 'submit_failed' ? ' (check your email first: it may have been sent)' : '';
-    await sendManual(sender, chatId, db, job, `⚠️ ${escapeHtml(reason)} — finish manually${extra} — ${jobName(job)}`, r.shot);
+    await sendManual(sender, chatId, db, job, `⚠️ ${reason} — finish manually${extra} — ${jobName(job)}`, r.shot);
   }
   const sub = latestSubmission(db, jobId);
   if (sub && !sub.notifiedAt) updateSubmission(db, sub.id, { notifiedAt: now });
+}
+
+/**
+ * Runs one submit (the caller wraps runSubmit in the browser mutex) and reports it. If the run throws or the result
+ * message can't be delivered, the latest submission's notifiedAt is cleared so notifySubmissions re-sends the right
+ * message (fill card, finish manually, applied…) on the next loop.
+ */
+export async function submitAndReport(a: {
+  sender: SubmissionSender; chatId: string | undefined; db: Db; cfg: SubmitCfg; jobId: number; submit: () => Promise<SubmitRunResult>;
+}): Promise<void> {
+  const clearNotified = () => {
+    const sub = latestSubmission(a.db, a.jobId);
+    if (sub) updateSubmission(a.db, sub.id, { notifiedAt: null });
+  };
+  let r: SubmitRunResult;
+  try {
+    r = await a.submit();
+  } catch (e) {
+    console.error(`[submit] job #${a.jobId} failed:`, errMsg(e));
+    clearNotified();
+    return;
+  }
+  console.log(`[submit] job #${a.jobId}: ${r.status}${r.reason ? ` (${r.reason})` : ''}`);
+  if (!a.chatId) { clearNotified(); return; }
+  try {
+    await reportSubmitResult(a.sender, a.chatId, a.db, a.cfg, a.jobId, r);
+  } catch (e) {
+    console.error(`[submit] result message failed for job #${a.jobId}; the loop will re-send it:`, errMsg(e));
+    clearNotified();
+  }
 }
 
 /** Approve: sends the copy-paste ready message unless the fill loop will handle the job (it sends the screenshot card). */

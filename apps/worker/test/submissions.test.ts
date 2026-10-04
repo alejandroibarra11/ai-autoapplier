@@ -9,7 +9,7 @@ import {
 import { handleDraftAction } from '../src/drafts';
 import {
   createSubmitTaps, formatFillCard, handleCancel, notifySubmissions, parseSubmitCallback, photoFits, reportSubmitResult,
-  sendReadyUnlessAutoFill, type SubmissionSender,
+  sendReadyUnlessAutoFill, submitAndReport, type SubmissionSender,
 } from '../src/submissions';
 
 const dir = mkdtempSync(join(tmpdir(), 'aa-subs-'));
@@ -105,8 +105,11 @@ describe('photoFits', () => {
 
 describe('parseSubmitCallback', () => {
   it('parses su:/ca:', () => {
-    expect(parseSubmitCallback('su:4')).toEqual({ action: 'submit', jobId: 4 });
-    expect(parseSubmitCallback('ca:4')).toEqual({ action: 'cancel', jobId: 4 });
+    expect(parseSubmitCallback('su:4:d')).toEqual({ action: 'submit', jobId: 4, cardDry: true });
+    expect(parseSubmitCallback('su:4:r')).toEqual({ action: 'submit', jobId: 4, cardDry: false });
+    expect(parseSubmitCallback('su:4')).toEqual({ action: 'submit', jobId: 4, cardDry: null });
+    expect(parseSubmitCallback('ca:4')).toEqual({ action: 'cancel', jobId: 4, cardDry: null });
+    expect(parseSubmitCallback('su:4:x')).toBeNull();
     expect(parseSubmitCallback('ap:4')).toBeNull();
   });
 });
@@ -120,7 +123,7 @@ describe('notifySubmissions', () => {
     expect(calls[0]!.type).toBe('photo');
     expect(calls[0]!.text).toContain('🧪 Dry run is ON');
     expect(calls[0]!.other?.parse_mode).toBe('HTML');
-    expect(kb(calls[0]!)).toContain(`su:${id}`);
+    expect(kb(calls[0]!)).toContain(`"su:${id}:d"`);
     expect(kb(calls[0]!)).toContain(`ca:${id}`);
     expect(await notifySubmissions(sender, '42', db, cfg(true), { delay: async () => {} })).toBe(0);
     expect(calls).toHaveLength(1);
@@ -130,7 +133,7 @@ describe('notifySubmissions', () => {
     const { calls, sender } = recorder();
     await notifySubmissions(sender, '42', db, cfg(false), { delay: async () => {} });
     expect(calls.map((c) => c.type)).toEqual(['doc']);
-    expect(kb(calls[0]!)).toContain('su:');
+    expect(kb(calls[0]!)).toMatch(/"su:\d+:r"/);
   });
   it('a long card keeps the caption ≤ 1024 and sends the details as a follow-up', async () => {
     const many = { ...PLAN, entries: Array.from({ length: 6 }, (_, i) => entry(`q${i}`, `Question ${i} ${'l'.repeat(80)}`, 'y'.repeat(300), 'fill_time')) };
@@ -164,14 +167,15 @@ describe('notifySubmissions', () => {
     expect(await notifySubmissions(sender, '42', db, cfg(true), { delay: async () => {} })).toBe(0);
     expect(calls).toHaveLength(before);
   });
-  it('a reason too long for a caption: screenshot first, then the text as a message', async () => {
+  it('a long reason is cut by escaped length so it still fits the photo caption', async () => {
     const { db } = setup({ status: 'needs_manual', result: 'blocked', evidence: 'missing answer: ' + '&'.repeat(590) });
     const { calls, sender } = recorder();
     expect(await notifySubmissions(sender, '42', db, cfg(true), { delay: async () => {} })).toBe(1);
     expect(calls[0]!.type).toBe('photo');
-    expect(calls[0]!.text.endsWith('|')).toBe(true);
-    expect(calls[1]!.type).toBe('msg');
-    expect(calls[1]!.text).toContain('⚠️ Finish manually');
+    const caption = calls[0]!.text.split('|').slice(1).join('|');
+    expect(caption).toContain('⚠️ Finish manually');
+    expect(caption.length).toBeLessThanOrEqual(1024);
+    expect(caption).toMatch(/&amp;…/);
   });
   it('a stale-sweep submit_failed is notified once with a Mark applied button', async () => {
     const { db, id, subId } = setup({ status: 'submit_failed', result: 'failed', evidence: STALE_SUBMIT_NOTE });
@@ -214,27 +218,51 @@ describe('submit taps', () => {
     const { db, id } = setup();
     let release!: () => void;
     const ran: number[] = [];
-    const tap = createSubmitTaps(db, '42', async (jobId) => {
+    const tap = createSubmitTaps(db, '42', true, async (jobId) => {
       ran.push(jobId);
       await new Promise<void>((r) => { release = r; });
       setStatus(db, jobId, 'applied');
     });
-    expect(tap(7, id)).toEqual({ ok: false, text: 'Not allowed' });
-    const first = tap(42, id);
+    expect(tap(7, id, true)).toEqual({ ok: false, text: 'Not allowed' });
+    const first = tap(42, id, true);
     expect(first).toMatchObject({ ok: true, text: '🚀 Submitting…' });
     const done = first.start!();
-    expect(tap(42, id)).toEqual({ ok: false, text: '⏳ Already submitting' });
+    expect(tap(42, id, true)).toEqual({ ok: false, text: '⏳ Already submitting' });
     await new Promise((r) => setTimeout(r, 0));
     release();
     await done;
     expect(ran).toEqual([id]);
-    expect(tap(42, id)).toEqual({ ok: false, text: 'Already applied' });
+    expect(tap(42, id, true)).toEqual({ ok: false, text: 'Already applied' });
   });
   it('a failing run is logged and frees the job for another tap', async () => {
     const { db, id } = setup();
-    const tap = createSubmitTaps(db, '42', async () => { throw new Error('boom'); });
-    await tap(42, id).start!();
-    expect(tap(42, id).ok).toBe(true);
+    const tap = createSubmitTaps(db, '42', false, async () => { throw new Error('boom'); });
+    await tap(42, id, false).start!();
+    expect(tap(42, id, false).ok).toBe(true);
+  });
+  it('matching mode → run called once', async () => {
+    for (const dry of [true, false]) {
+      const { db, id } = setup();
+      const ran: number[] = [];
+      const tap = createSubmitTaps(db, '42', dry, async (j) => { ran.push(j); });
+      const r = tap(42, id, dry);
+      expect(r.ok).toBe(true);
+      await r.start!();
+      expect(ran).toEqual([id]);
+    }
+  });
+  it('mode changed (dry card + dry run off, real card + dry run on, legacy card) → no run, re-fill', () => {
+    for (const [cardDry, dryRun] of [[true, false], [false, true], [null, false], [null, true]] as const) {
+      const { db, id } = setup();
+      const ran: number[] = [];
+      const tap = createSubmitTaps(db, '42', dryRun, async (j) => { ran.push(j); });
+      const r = tap(42, id, cardDry);
+      expect(r).toEqual({ ok: true, text: 'Mode changed — sending a fresh screenshot' });
+      expect(r.start).toBeUndefined();
+      expect(ran).toEqual([]);
+      expect(getJob(db, id)!.status).toBe('ready_to_apply');
+      expect(tap(42, id, dryRun)).toEqual({ ok: false, text: 'Already ready_to_apply' });
+    }
   });
 });
 
@@ -263,37 +291,37 @@ describe('reportSubmitResult', () => {
   it('dry run: unambiguous text, screenshot, Submit/Cancel again', async () => {
     const { db, id } = setup();
     const { calls, sender } = recorder();
-    await reportSubmitResult(sender, '42', db, id, { status: 'dry_run', shot: png(800, 1600) });
+    await reportSubmitResult(sender, '42', db, cfg(true), id, { status: 'dry_run', shot: png(800, 1600) });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.type).toBe('photo');
     expect(calls[0]!.text).toContain('🧪 Dry run — nothing was sent.');
     expect(calls[0]!.text).toContain('submit.dryRun');
-    expect(kb(calls[0]!)).toContain(`su:${id}`);
+    expect(kb(calls[0]!)).toContain(`"su:${id}:d"`);
     expect(kb(calls[0]!)).toContain(`ca:${id}`);
   });
   it('applied: ✅ Applied — <company> with the screenshot', async () => {
     const { db, id } = setup({ status: 'applied', result: 'filled' });
     const { calls, sender } = recorder();
-    await reportSubmitResult(sender, '42', db, id, { status: 'applied', shot: png(800, 1600) });
+    await reportSubmitResult(sender, '42', db, cfg(true), id, { status: 'applied', shot: png(800, 1600) });
     expect(calls[0]!.text).toContain('✅ Applied — Acme &amp; Co');
   });
   it('refused: the reason, with the keyboard back while still awaiting_submit', async () => {
     const { db, id } = setup();
     const { calls, sender } = recorder();
-    await reportSubmitResult(sender, '42', db, id, { status: 'refused', reason: 'Daily limit <15> reached' });
+    await reportSubmitResult(sender, '42', db, cfg(true), id, { status: 'refused', reason: 'Daily limit <15> reached' });
     expect(calls[0]!.type).toBe('msg');
     expect(calls[0]!.text).toContain('Daily limit &lt;15&gt; reached');
-    expect(kb(calls[0]!)).toContain(`su:${id}`);
+    expect(kb(calls[0]!)).toContain(`"su:${id}:d"`);
     setStatus(db, id, 'applied');
     const r2 = recorder();
-    await reportSubmitResult(r2.sender, '42', db, id, { status: 'refused', reason: 'Not awaiting submit (status applied)' });
+    await reportSubmitResult(r2.sender, '42', db, cfg(true), id, { status: 'refused', reason: 'Not awaiting submit (status applied)' });
     expect(kb(r2.calls[0]!)).not.toContain('su:');
   });
   it('submit_failed / needs_manual: finish manually + screenshot + copy-paste + Mark applied', async () => {
     for (const status of ['submit_failed', 'needs_manual'] as const) {
       const { db, id } = setup({ status, result: status === 'needs_manual' ? 'blocked' : 'failed' });
       const { calls, sender } = recorder();
-      await reportSubmitResult(sender, '42', db, id, { status, reason: 'unknown: no confirmation', shot: png(800, 1600) });
+      await reportSubmitResult(sender, '42', db, cfg(true), id, { status, reason: 'unknown: no confirmation', shot: png(800, 1600) });
       expect(calls[0]!.text).toContain('⚠️ unknown: no confirmation — finish manually');
       expect(calls.some((c) => c.text.includes('Ready to apply'))).toBe(true);
       expect(calls.some((c) => kb(c).includes(`ma:${id}`))).toBe(true);
@@ -303,7 +331,7 @@ describe('reportSubmitResult', () => {
     const { db, id, subId } = setup();
     updateSubmission(db, subId!, { result: 'dry_run' });
     const { sender } = recorder();
-    await reportSubmitResult(sender, '42', db, id, { status: 'dry_run', shot: png(800, 1600) });
+    await reportSubmitResult(sender, '42', db, cfg(true), id, { status: 'dry_run', shot: png(800, 1600) });
     const r2 = recorder();
     expect(await notifySubmissions(r2.sender, '42', db, cfg(true), { delay: async () => {} })).toBe(0);
   });
@@ -323,5 +351,86 @@ describe('approve → ready message', () => {
     const { calls, sender } = recorder();
     expect(await sendReadyUnlessAutoFill(sender, '42', db, id)).toBe('ready');
     expect(calls.some((c) => c.text.includes('Ready to apply'))).toBe(true);
+  });
+});
+
+describe('lost results are re-sent by the loop', () => {
+  it('result message fails once → notifiedAt cleared → notifySubmissions sends the right message', async () => {
+    const { db, id, subId } = setup();
+    updateSubmission(db, subId!, { notifiedAt: new Date() });
+    const down = recorder({ msg: true, photo: true, doc: true });
+    await submitAndReport({ sender: down.sender, chatId: '42', db, cfg: cfg(true), jobId: id, submit: async () => {
+      updateSubmission(db, subId!, { result: 'dry_run', submitShot: png(800, 1600) });
+      return { status: 'dry_run', shot: png(800, 1600) };
+    } });
+    expect(latestSubmission(db, id)!.notifiedAt).toBeNull();
+    const up = recorder();
+    expect(await notifySubmissions(up.sender, '42', db, cfg(true), { delay: async () => {} })).toBe(1);
+    expect(kb(up.calls[0]!)).toContain(`"su:${id}:d"`);
+  });
+  it('the run throws (e.g. before the claim) → notifiedAt cleared, the card comes back', async () => {
+    const { db, id, subId } = setup();
+    updateSubmission(db, subId!, { notifiedAt: new Date() });
+    const { calls, sender } = recorder();
+    await submitAndReport({ sender, chatId: '42', db, cfg: cfg(true), jobId: id, submit: async () => { throw new Error('browser gone'); } });
+    expect(calls).toEqual([]);
+    expect(latestSubmission(db, id)!.notifiedAt).toBeNull();
+    expect(await notifySubmissions(sender, '42', db, cfg(true), { delay: async () => {} })).toBe(1);
+  });
+  it('a delivered result keeps notifiedAt set', async () => {
+    const { db, id, subId } = setup();
+    updateSubmission(db, subId!, { notifiedAt: new Date() });
+    const { calls, sender } = recorder();
+    await submitAndReport({ sender, chatId: '42', db, cfg: cfg(true), jobId: id, submit: async () => ({ status: 'refused', reason: 'Daily limit reached' }) });
+    expect(calls).toHaveLength(1);
+    expect(latestSubmission(db, id)!.notifiedAt).not.toBeNull();
+  });
+});
+
+describe('copy-paste failures after the headline', () => {
+  it('headline delivered, copy-paste throws → marked notified, no duplicate headline', async () => {
+    const { db } = setup({ status: 'needs_manual', result: 'blocked', evidence: 'login required to apply' });
+    const calls: string[] = [];
+    let photos = 0;
+    const sender: SubmissionSender = {
+      sendPhoto: async () => { photos++; calls.push('photo'); },
+      sendDocument: async () => { throw new Error('down'); },
+      sendMessage: async () => { throw new Error('down'); },
+    };
+    const readyBoom = { ...sender, sendMessage: async () => { throw new Error('down'); } };
+    expect(await notifySubmissions(readyBoom, '42', db, cfg(true), { delay: async () => {} })).toBe(1);
+    expect(await notifySubmissions(readyBoom, '42', db, cfg(true), { delay: async () => {} })).toBe(0);
+    expect(photos).toBe(1);
+  });
+});
+
+describe('escaped lengths stay within Telegram limits', () => {
+  it("'&'-heavy title, reasons and fill-time answers: messages ≤ 4096, captions ≤ 1024", async () => {
+    const amp = (n: number) => '&'.repeat(n);
+    const heavy = { ...PLAN, entries: Array.from({ length: 8 }, (_, i) => entry(`q${i}`, `${i}${amp(1000)}`, amp(3000), 'fill_time')) };
+    const all: Call[] = [];
+    const check = () => {
+      for (const c of all) {
+        if (c.type === 'msg') expect(c.text.length).toBeLessThanOrEqual(4096);
+        else expect(c.text.split('|').slice(1).join('|').length).toBeLessThanOrEqual(1024);
+      }
+    };
+    for (const opts of [
+      { plan: heavy },
+      { status: 'needs_manual' as const, result: 'blocked' as const, evidence: amp(5000) },
+      { status: 'submit_failed' as const, result: 'failed' as const, evidence: amp(5000) },
+    ]) {
+      const { db, id } = setup(opts);
+      db.$client.prepare('update jobs set title = ?, company = ? where id = ?').run(amp(2000), amp(2000), id);
+      const { calls, sender } = recorder();
+      expect(await notifySubmissions(sender, '42', db, cfg(true), { delay: async () => {} })).toBe(1);
+      all.push(...calls);
+      const r2 = recorder();
+      await reportSubmitResult(r2.sender, '42', db, cfg(true), id, { status: 'refused', reason: amp(6000) });
+      await reportSubmitResult(r2.sender, '42', db, cfg(true), id, { status: 'needs_manual', reason: amp(6000), shot: png(800, 1600) });
+      all.push(...r2.calls);
+    }
+    expect(all.length).toBeGreaterThan(5);
+    check();
   });
 });

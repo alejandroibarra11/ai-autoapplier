@@ -24,6 +24,8 @@ export interface PageFactory { newPage(): Promise<Page> }
 export interface FillDeps {
   db: Db; cfg: Config; provider: LLMProvider; profile: Profile; answers: Answers; shotsDir: string;
   pages: PageFactory; now?: Date; limit?: number; onlyJobId?: number;
+  /** Skip the stale filling/submitting sweep (the CLI: another process may own those jobs). Default false. */
+  skipStaleSweep?: boolean;
   /** Test seam: runs after a job is picked and before it is claimed. */
   hooks?: { beforeClaim?: () => void | Promise<void> };
 }
@@ -123,7 +125,7 @@ async function fillJob(d: FillDeps, job: JobRow, filler: AtsFiller, now: Date, c
 export async function runFill(d: FillDeps): Promise<FillRunResult> {
   const { db } = d;
   const now = d.now ?? new Date();
-  resetStaleFillSubmit(db, new Date(now.getTime() - STALE_MS), now);
+  if (!d.skipStaleSweep) resetStaleFillSubmit(db, new Date(now.getTime() - STALE_MS), now);
   const res: FillRunResult = { filled: 0, manual: 0 };
   const queue = d.onlyJobId === undefined
     ? listJobsForFilling(db, d.limit ?? 3)

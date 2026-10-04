@@ -107,7 +107,7 @@ export async function notifyPending(
 
 export interface BotOptions {
   /** 🚀 Submit tap handler (see createSubmitTaps). Without it Submit taps are refused. */
-  submitTap?: (fromChatId: string | number | undefined, jobId: number) => SubmitTapResult;
+  submitTap?: (fromChatId: string | number | undefined, jobId: number, cardDry: boolean | null) => SubmitTapResult;
 }
 
 export function createBot(token: string, chatId: string, db: Db, onReady?: (jobId: number) => Promise<void>, opts: BotOptions = {}): Bot {
@@ -123,13 +123,14 @@ export function createBot(token: string, chatId: string, db: Db, onReady?: (jobI
       return;
     }
     if (sc?.action === 'submit') {
-      const r = opts.submitTap ? opts.submitTap(ctx.chat?.id, sc.jobId) : { ok: false, text: 'Submitting is not available' };
+      const r = opts.submitTap ? opts.submitTap(ctx.chat?.id, sc.jobId, sc.cardDry) : { ok: false, text: 'Submitting is not available' };
       // Answer first (Telegram expects it quickly), drop the buttons (press-once), then queue the submit behind the
       // browser mutex without blocking the bot's update loop; the result arrives as a new message.
       await ctx.answerCallbackQuery({ text: r.text }).catch(() => {});
-      if (!r.ok || !r.start) return;
+      if (!r.ok) return;
       await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() }).catch(() => {});
-      void r.start();
+      // No start = the card's dry-run mode is stale: the job went back to ready_to_apply and the fill loop re-fills it.
+      if (r.start) void r.start();
       return;
     }
     if (/^(ap|sd|ma):/.test(data)) {
