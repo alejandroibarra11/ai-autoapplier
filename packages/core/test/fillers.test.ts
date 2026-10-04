@@ -173,6 +173,44 @@ describe('greenhouseFiller', () => {
     await page.close();
   }, 60_000);
 
+  const resumeGroup = (page: Page) => page.locator('[role="group"][aria-labelledby="upload-label-resume"]');
+
+  it('waits for / recovers from a late uploader and ends with the resume chip attached', async () => {
+    posted.length = 0;
+    const page = await open('greenhouse-form.html', '?uploaderlate');
+    const r = await greenhouseFiller.fill(page, plan);
+    expect(r.filled).toContain('identity:resume');
+    expect(await resumeGroup(page).locator('.chip').innerText()).toBe('cv.pdf');
+    expect(await resumeGroup(page).innerText()).not.toMatch(/cannot read|error/i);
+    expect(r.failed).toEqual([]);
+    expect(r.requiredEmpty).toEqual([]);
+    expect(await page.inputValue('#first_name')).toBe('Jane');
+    expect(await page.inputValue('#cover_letter_text')).toBe('Hello');
+    expect(allSorted(r)).toEqual(plan.entries.map((x) => x.fieldId).sort());
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 90_000);
+
+  it('an upload error text in the resume group is failed, never filled, and the resume counts as required-empty', async () => {
+    posted.length = 0;
+    const page = await open('greenhouse-form.html', '?uploadfailtext');
+    const r = await greenhouseFiller.fill(page, plan);
+    expect(r.failed).toContain('identity:resume');
+    expect(r.filled).not.toContain('identity:resume');
+    expect(r.requiredEmpty).toContain('Resume/CV');
+    expect(await resumeGroup(page).locator('.chip').count()).toBe(0);
+    expect(allSorted(r)).toEqual(plan.entries.map((x) => x.fieldId).sort());
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 90_000);
+
+  it('a required resume group without a filename chip is required-empty', async () => {
+    const page = await open('greenhouse-form.html');
+    const r = await greenhouseFiller.fill(page, { ...plan, entries: plan.entries.filter((x) => x.fieldId !== 'identity:resume') });
+    expect(r.requiredEmpty).toEqual(['Resume/CV']);
+    await page.close();
+  }, 60_000);
+
   it('does not click a partial match ("No" vs "Not sure")', async () => {
     const page = await open('greenhouse-form.html');
     await setOpts(page, '#question_2', 'Not sure|None of the above');
