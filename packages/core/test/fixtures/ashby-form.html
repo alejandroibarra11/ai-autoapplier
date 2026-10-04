@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Engineer @ Acme</title></head>
+<body><div id="root">
+<form id="app" action="/apply" method="post" onsubmit="return false">
+<div class="ashby-application-form-container">
+  <div class="ashby-application-form-field-entry" data-field-path="_systemfield_name"><label class="_required_x ashby-application-form-question-title" for="_systemfield_name">Name</label><div><input placeholder="Type here..." name="_systemfield_name" required id="_systemfield_name" type="text"></div></div>
+  <div class="ashby-application-form-field-entry" data-field-path="_systemfield_email"><label class="_required_x" for="_systemfield_email">Email</label><div><input name="_systemfield_email" required id="_systemfield_email" type="email"></div></div>
+  <div class="ashby-application-form-field-entry" data-field-path="3a4f61e5"><label class="_required_x" for="3a4f61e5">Phone Number</label><input name="3a4f61e5" required id="3a4f61e5" type="tel"></div>
+  <div class="ashby-application-form-field-entry" data-field-path="f202d233"><label class="_required_x" for="f202d233">Linkedin</label><div><input name="f202d233" required id="f202d233" type="text"></div></div>
+  <div class="ashby-application-form-field-entry" data-field-path="99fc6622"><label for="99fc6622">Github Link</label><div><input name="99fc6622" id="99fc6622" type="text"></div></div>
+  <div class="ashby-application-form-field-entry" data-field-path="_systemfield_resume"><label class="_required_x" for="_systemfield_resume">Resume</label><div role="presentation" class="ashby-application-form-input-file"><input type="file" tabindex="-1" id="_systemfield_resume" required><div class="ashby-application-form-input-file-dropzone"><button type="button" onclick="document.getElementById('_systemfield_resume').click()">Upload File</button></div></div></div>
+  <div class="ashby-application-form-field-entry" data-field-path="_systemfield_location"><label class="_required_x" for="_systemfield_location">Location</label><div class="_inputContainer"><input class="ashby-application-form-input-autocomplete" placeholder="Start typing..." aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" role="combobox" value="" data-options="Mexico City, Mexico|Guadalajara, Jalisco, Mexico|Guadalajara, Spain"></div></div>
+  <div class="ashby-application-form-field-entry" data-field-path="84467dbc"><label class="_required_x" for="84467dbc">Able to work in our SF office?</label><div class="ashby-application-form-input-yesno"><button type="button" aria-pressed="false" data-option="yes">Yes</button><button type="button" aria-pressed="false" data-option="no">No</button><input type="checkbox" tabindex="-1" name="84467dbc"></div></div>
+  <div class="ashby-application-form-field-entry" data-field-path="6c450ee8"><label class="_required_x" for="6c450ee8">Authorized to work in the US?</label><div class="ashby-application-form-input-yesno"><button type="button" aria-pressed="false" data-option="yes">Yes</button><button type="button" aria-pressed="false" data-option="no">No</button><input type="checkbox" tabindex="-1" name="6c450ee8"></div></div>
+  <div class="ashby-application-form-field-entry" data-field-path="aa11"><label for="aa11">Why us?</label><textarea name="aa11" id="aa11"></textarea></div>
+  <div class="ashby-application-form-field-entry" data-field-path="bb22"><label for="bb22">Pick one</label><select name="bb22" id="bb22"><option value=""></option><option>Yes</option><option>Yes, maybe</option><option>No</option></select></div>
+  <div data-field-path="_systemfield_eeoc_gender" data-field-entry-id="e1__systemfield_eeoc_gender"><fieldset class="ashby-application-form-input-radio-group"><label for="_systemfield_eeoc_gender">Gender</label>
+    <div class="ashby-application-form-input-radio-group-option"><span><span class="_circle"></span><input type="radio" id="g-0" name="e1__systemfield_eeoc_gender" style="opacity:0;position:absolute"></span><label for="g-0">Male</label></div>
+    <div class="ashby-application-form-input-radio-group-option"><span><span class="_circle"></span><input type="radio" id="g-1" name="e1__systemfield_eeoc_gender" style="opacity:0;position:absolute"></span><label for="g-1">Decline to self-identify</label></div>
+  </fieldset></div>
+</div>
+<button type="button" class="ashby-application-form-submit-button"><span>Submit Application</span></button>
+</form></div>
+<script>
+(() => {
+  const q = location.search;
+  if (q.includes('norequired')) document.querySelectorAll('[required]').forEach((el) => el.removeAttribute('required'));
+  if (q.includes('errorboundary')) document.body.insertAdjacentHTML('afterbegin', '<div class="_error_abc">Something went wrong loading a widget</div>');
+  // like Ashby: the yes/no buttons toggle aria-pressed and mirror into the hidden checkbox
+  document.querySelectorAll('.ashby-application-form-input-yesno').forEach((c) => c.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+    c.querySelectorAll('button').forEach((o) => o.setAttribute('aria-pressed', String(o === b)));
+    c.querySelector('input').checked = b.dataset.option === 'yes';
+  })));
+  const rl = document.getElementById('_systemfield_resume');
+  rl.addEventListener('change', () => {
+    const chip = document.createElement('div'); chip.className = 'file-chip';
+    chip.textContent = q.includes('uploadfail') ? 'Upload failed' : rl.files[0].name;
+    rl.parentElement.appendChild(chip); // the input stays; a chip shows the name
+    if (q.includes('uploadfail')) rl.value = '';
+  });
+  const close = () => document.querySelectorAll('[role=listbox]').forEach((l) => l.remove());
+  const loc = document.querySelector('[role=combobox]');
+  loc.addEventListener('input', () => {
+    close();
+    const box = document.createElement('div'); box.setAttribute('role', 'listbox');
+    for (const o of loc.dataset.options.split('|').filter((o) => o.toLowerCase().includes(loc.value.toLowerCase()))) {
+      const d = document.createElement('div'); d.setAttribute('role', 'option'); d.textContent = o;
+      d.addEventListener('mousedown', (ev) => { ev.preventDefault(); loc.value = o; close(); });
+      box.appendChild(d);
+    }
+    loc.parentElement.appendChild(box);
+  });
+  const form = document.getElementById('app');
+  document.querySelector('.ashby-application-form-submit-button').addEventListener('click', async () => {
+    await fetch('/apply', { method: 'POST', body: new FormData(form) });
+    document.getElementById('root').innerHTML = '<h1>Thank you for applying</h1>';
+    history.pushState({}, '', '/acme/jobs/1/application/submitted');
+  });
+})();
+</script>
+</body></html>

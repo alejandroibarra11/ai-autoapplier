@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium, type Browser, type Page } from 'playwright';
 import { greenhouseFiller } from '../src/submit/fillers/greenhouse';
+import { leverFiller } from '../src/submit/fillers/lever';
+import { ashbyFiller } from '../src/submit/fillers/ashby';
 import { guardFill, chooseCombobox, fillText } from '../src/submit/dom';
 import { fillerFor } from '../src/submit/fillers';
 import { takeShot, pngSize } from '../src/submit/screenshot';
@@ -205,6 +207,202 @@ describe('greenhouseFiller', () => {
 
   it('fillerFor maps kinds', () => {
     expect(fillerFor('greenhouse')).toBe(greenhouseFiller);
+    expect(fillerFor('lever')).toBe(leverFiller);
+    expect(fillerFor('ashby')).toBe(ashbyFiller);
     expect(fillerFor('other')).toBeNull();
   });
+});
+
+const P = (entries: FillPlan['entries']): FillPlan => ({ missingRequired: [], manualReasons: [], entries });
+const allSorted = (r: { filled: string[]; notFound: string[]; failed: string[] }) => [...r.filled, ...r.notFound, ...r.failed].sort();
+
+const leverPlan: FillPlan = P([
+  e('identity:firstName', 'Jane'), e('identity:lastName', 'Doe'), e('identity:fullName', 'Jane Doe'), e('identity:email', 'jane@example.com'),
+  e('identity:phone', '+52 000 000 0000'), e('identity:country', 'Mexico'), e('identity:location', 'Guadalajara, Mexico'),
+  e('identity:currentCompany', 'Initech', 'text', false), e('identity:linkedin', 'https://linkedin.com/in/x', 'text', false),
+  e('identity:github', 'https://github.com/x', 'text', false), e('identity:portfolio', 'https://x.dev', 'text', false),
+  e('identity:resume', cv, 'file'), e('identity:coverLetter', 'Hello\nthere', 'textarea', false),
+  e('cards[c1][field0]', 'About me\nline two', 'textarea', true, 'draft'),
+  e('cards[c1][field1]', "Bachelor's degree", 'select', true, 'answers'),
+  e('cards[c1][field2]', 'EU; US', 'multiselect', false, 'answers'),
+  e('cards[c1][field3]', 'Yes', 'select', false, 'answers'),
+]);
+
+describe('leverFiller', () => {
+  it('fills every field (resume first, location autocomplete, radios/checkboxes by label, native select)', async () => {
+    posted.length = 0;
+    const page = await open('lever-form.html');
+    const r = await leverFiller.fill(page, leverPlan);
+    expect(r.failed).toEqual([]);
+    expect(r.requiredEmpty).toEqual([]);
+    expect(r.notFound.sort()).toEqual(['identity:country', 'identity:firstName', 'identity:lastName']);
+    expect(await page.inputValue('[name="name"]')).toBe('Jane Doe'); // not overwritten by the resume parser, which ran first
+    expect(await page.inputValue('[name="email"]')).toBe('jane@example.com');
+    expect(await page.inputValue('[name="org"]')).toBe('Initech');
+    expect(await page.inputValue('[name="urls[LinkedIn Profile]"]')).toBe('https://linkedin.com/in/x');
+    expect(await page.inputValue('[name="urls[Github]"]')).toBe('https://github.com/x');
+    expect(await page.inputValue('[name="location"]')).toBe('Guadalajara, Jalisco, MEX');
+    expect(await page.inputValue('[name="selectedLocation"]')).toContain('Guadalajara');
+    expect(await page.locator('.filename').innerText()).toBe('cv.pdf');
+    expect(await page.inputValue('[name="comments"]')).toBe('Hello\nthere');
+    expect(await page.locator('[name="cards[c1][field1]"]:checked').getAttribute('value')).toBe("Bachelor's degree"); // not "Bachelor's degree or above"
+    expect(await page.locator('[name="cards[c1][field2]"]:checked').evaluateAll((els) => els.map((x) => (x as HTMLInputElement).value))).toEqual(['EU', 'US']);
+    expect(await page.inputValue('[name="cards[c1][field3]"]')).toBe('Yes');
+    expect(allSorted(r)).toEqual(leverPlan.entries.map((x) => x.fieldId).sort());
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it('reports a missing planned field and empty required fields', async () => {
+    const page = await open('lever-form.html');
+    const r = await leverFiller.fill(page, P([e('identity:email', 'jane@example.com'), e('cards[c1][field99]', 'x', 'text', true, 'draft')]));
+    expect(r.notFound).toContain('cards[c1][field99]');
+    expect(r.requiredEmpty).toEqual(expect.arrayContaining(['Full name', 'Education']));
+    expect(r.requiredEmpty.filter((x) => /education/i.test(x)).length).toBe(1); // a radio group is reported once
+    await page.close();
+  }, 60_000);
+
+  it('never submits through typed newlines; textareas keep them', async () => {
+    posted.length = 0;
+    const page = await open('lever-form.html', '?norequired');
+    const r = await leverFiller.fill(page, P([e('identity:fullName', 'Jane\nDoe'), e('cards[c1][field0]', 'a\nb', 'textarea')]));
+    await page.waitForTimeout(500);
+    expect(posted).toEqual([]);
+    expect(r.filled).toEqual(['identity:fullName', 'cards[c1][field0]']);
+    expect(await page.inputValue('[name="name"]')).toBe('Jane Doe');
+    expect(await page.inputValue('[name="cards[c1][field0]"]')).toBe('a\nb');
+    await page.close();
+  }, 60_000);
+
+  it('fill runs under guardFill (form post aborted mid-fill)', async () => {
+    posted.length = 0;
+    const page = await open('lever-form.html', '?norequired');
+    await page.evaluate(() => { document.querySelector('[name="name"]')!.addEventListener('input', () => { (document.getElementById('application-form') as HTMLFormElement).requestSubmit(); (document.getElementById('application-form') as HTMLFormElement).submit(); }); });
+    await leverFiller.fill(page, P([e('identity:fullName', 'Jane Doe')]));
+    await page.waitForTimeout(500);
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it('choices need an exact option; location needs the right country; nothing is guessed', async () => {
+    const page = await open('lever-form.html');
+    const r = await leverFiller.fill(page, P([
+      e('cards[c1][field1]', "Bachelor's", 'select'), e('cards[c1][field3]', 'Ye', 'select'), e('cards[c1][field3]', 'yes, MAYBE', 'select'),
+      e('identity:location', 'Guadalajara, Spain'),
+    ]));
+    expect(r.failed).toEqual(['cards[c1][field1]', 'cards[c1][field3]', 'cards[c1][field3]']);
+    expect(await page.locator('[name="cards[c1][field1]"]:checked').count()).toBe(0);
+    expect(r.filled).toContain('identity:location'); // Spain is a real, exactly requested country here
+    expect(await page.inputValue('[name="location"]')).toBe('Guadalajara, Castilla-La Mancha, ESP');
+    const page2 = await open('lever-form.html');
+    const r2 = await leverFiller.fill(page2, P([e('identity:location', 'Guadalajara, Peru')]));
+    expect(r2.failed).toEqual(['identity:location']);
+    expect(await page2.inputValue('[name="location"]')).toBe('');
+    await page.close(); await page2.close();
+  }, 60_000);
+
+  it('a navigation during fill fails the current and remaining entries', async () => {
+    posted.length = 0;
+    const page = await open('lever-form.html', '?norequired');
+    const r = await leverFiller.fill(page, P([e('identity:fullName', 'Jane'), e('cards[c1][nav]', 'go'), e('identity:email', 'a@b.co')]));
+    expect(r.filled).toEqual(['identity:fullName']);
+    expect(r.failed).toEqual(['cards[c1][nav]', 'identity:email']);
+    expect(r.notFound).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it('submits and detects the confirmation with exactly one intercepted POST; ignores a pre-existing error', async () => {
+    posted.length = 0;
+    const page = await open('lever-form.html', '?errorboundary');
+    await leverFiller.fill(page, leverPlan);
+    const out = await leverFiller.submit(page, 10_000);
+    expect(out.kind).toBe('confirmed');
+    expect(posted.length).toBe(1);
+    await page.close();
+  }, 60_000);
+});
+
+const ashbyPlan: FillPlan = P([
+  e('identity:firstName', 'Jane'), e('identity:fullName', 'Jane Doe'), e('identity:email', 'jane@example.com'), e('identity:phone', '+52 000 000 0000'),
+  e('identity:country', 'Mexico'), e('identity:location', 'Guadalajara, Mexico'), e('identity:resume', cv, 'file'),
+  e('identity:linkedin', 'https://linkedin.com/in/x', 'text', true), e('identity:github', 'https://github.com/x', 'text', false),
+  e('84467dbc', 'Yes', 'choice', true, 'answers'), e('6c450ee8', 'No', 'choice', true, 'answers'),
+  e('aa11', 'Because\nreasons', 'textarea', false, 'draft'), e('bb22', 'No', 'select', false, 'answers'),
+  e('e1__systemfield_eeoc_gender', 'Decline to self-identify', 'select', true, 'decline'),
+]);
+
+describe('ashbyFiller', () => {
+  it('fills every field (yes/no buttons verified by aria-pressed, location, upload chip)', async () => {
+    posted.length = 0;
+    const page = await open('ashby-form.html');
+    const r = await ashbyFiller.fill(page, ashbyPlan);
+    expect(r.failed).toEqual([]);
+    expect(r.requiredEmpty).toEqual([]);
+    expect(r.notFound.sort()).toEqual(['identity:country', 'identity:firstName']);
+    expect(await page.inputValue('[name="_systemfield_name"]')).toBe('Jane Doe');
+    expect(await page.inputValue('[name="3a4f61e5"]')).toBe('+52 000 000 0000');
+    expect(await page.inputValue('[name="f202d233"]')).toBe('https://linkedin.com/in/x');
+    expect(await page.inputValue('[name="99fc6622"]')).toBe('https://github.com/x');
+    expect(await page.inputValue('[role=combobox]')).toBe('Guadalajara, Jalisco, Mexico');
+    expect(await page.locator('.file-chip').innerText()).toBe('cv.pdf');
+    expect(await page.getAttribute('[name="84467dbc"] ~ button, [data-field-path="84467dbc"] button[data-option="yes"]', 'aria-pressed')).toBe('true');
+    expect(await page.getAttribute('[data-field-path="84467dbc"] button[data-option="no"]', 'aria-pressed')).toBe('false');
+    expect(await page.getAttribute('[data-field-path="6c450ee8"] button[data-option="no"]', 'aria-pressed')).toBe('true');
+    expect(await page.inputValue('[name="aa11"]')).toBe('Because\nreasons');
+    expect(await page.inputValue('[name="bb22"]')).toBe('No');
+    expect(await page.isChecked('#g-1')).toBe(true);
+    expect(allSorted(r)).toEqual(ashbyPlan.entries.map((x) => x.fieldId).sort());
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it('reports a missing planned field and unanswered required yes/no', async () => {
+    const page = await open('ashby-form.html');
+    const r = await ashbyFiller.fill(page, P([e('identity:email', 'jane@example.com'), e('zz99', 'x', 'text', true, 'draft')]));
+    expect(r.notFound).toContain('zz99');
+    expect(r.requiredEmpty).toEqual(expect.arrayContaining(['Name', 'Able to work in our SF office?', 'Authorized to work in the US?']));
+    await page.close();
+  }, 60_000);
+
+  it('never submits through typed newlines', async () => {
+    posted.length = 0;
+    const page = await open('ashby-form.html', '?norequired');
+    await page.evaluate(() => { document.getElementById('app')!.setAttribute('onsubmit', 'fetch("/apply",{method:"POST"});return false'); });
+    const r = await ashbyFiller.fill(page, P([e('identity:fullName', 'Jane\nDoe'), e('aa11', 'a\nb', 'textarea')]));
+    await page.waitForTimeout(500);
+    expect(posted).toEqual([]);
+    expect(r.filled.length).toBe(2);
+    expect(await page.inputValue('[name="_systemfield_name"]')).toBe('Jane Doe');
+    await page.close();
+  }, 60_000);
+
+  it('fill runs under guardFill', async () => {
+    posted.length = 0;
+    const page = await open('ashby-form.html', '?norequired');
+    await page.evaluate(() => { document.querySelector('[name="_systemfield_name"]')!.addEventListener('input', () => { (document.getElementById('app') as HTMLFormElement).submit(); }); });
+    await ashbyFiller.fill(page, P([e('identity:fullName', 'Jane Doe')]));
+    await page.waitForTimeout(500);
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it('yes/no and select need an exact option; a failed upload fails; wrong-country location fails', async () => {
+    const page = await open('ashby-form.html', '?uploadfail');
+    const r = await ashbyFiller.fill(page, P([
+      e('84467dbc', 'Y', 'choice'), e('6c450ee8', 'maybe', 'choice'), e('bb22', 'Yes,', 'select'), e('identity:resume', cv, 'file'), e('identity:location', 'Guadalajara, Peru'),
+    ]));
+    expect(r.failed).toEqual(['84467dbc', '6c450ee8', 'bb22', 'identity:resume', 'identity:location']);
+    expect(await page.locator('button[aria-pressed="true"]').count()).toBe(0);
+    await page.close();
+  }, 60_000);
+
+  it('submits and detects the confirmation with exactly one intercepted POST; ignores a pre-existing error', async () => {
+    posted.length = 0;
+    const page = await open('ashby-form.html', '?errorboundary');
+    await ashbyFiller.fill(page, ashbyPlan);
+    const out = await ashbyFiller.submit(page, 10_000);
+    expect(out.kind).toBe('confirmed');
+    expect(posted.length).toBe(1);
+    await page.close();
+  }, 60_000);
 });

@@ -169,7 +169,13 @@ const REQUIRED_EMPTY_JS = `(() => {
       const isFile = type === 'file';
       if (!isFile && (style.visibility === 'hidden' || style.display === 'none' || (box.width === 0 && box.height === 0))) continue;
       let empty;
-      if (type === 'checkbox' || type === 'radio') empty = !e.checked;
+      if (type === 'radio') {
+        // a radio group is answered when any member is checked; report the group once, by its question text
+        const grp = Array.from(document.querySelectorAll('input[type="radio"]')).filter((r) => r.name === e.name);
+        if (!e.name || grp.some((r) => r.checked) || grp.indexOf(e) > 0) continue;
+        out.push(clean(e.closest('li.application-question, fieldset')?.querySelector('.application-label, legend, label')?.textContent) || e.name);
+        continue;
+      } else if (type === 'checkbox') empty = !e.checked;
       else if (isFile) empty = (e.files?.length ?? 0) === 0;
       else if (e.getAttribute('role') === 'combobox') {
         // react-select style widgets keep the chosen value in a sibling node while the input stays blank.
@@ -179,7 +185,7 @@ const REQUIRED_EMPTY_JS = `(() => {
       } else empty = !e.value;
       if (!empty) continue;
       const byFor = e.id ? document.querySelector('label[for="' + e.id + '"]') : null;
-      out.push(clean(byFor?.textContent) || clean(e.getAttribute('aria-label')) || clean(e.getAttribute('placeholder')) || e.id || e.name);
+      out.push(clean(byFor?.textContent) || clean(e.closest('li.application-question')?.querySelector('.application-label')?.textContent) || clean(e.getAttribute('aria-label')) || clean(e.getAttribute('placeholder')) || e.id || e.name);
     }
     return out;
 })()`;
