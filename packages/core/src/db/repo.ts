@@ -150,7 +150,7 @@ export function latestDraft(db: Db, jobId: number): DraftRow | undefined {
   return db.select().from(drafts).where(eq(drafts.jobId, jobId)).orderBy(desc(drafts.id)).limit(1).get();
 }
 
-export function updateDraftContent(db: Db, draftId: number, c: { coverLetter: string; answers: DraftAnswer[] }, now = new Date()): void {
+export function updateDraftContent(db: Db, draftId: number, c: { coverLetter: string; answers: DraftAnswer[]; flags?: string[] }, now = new Date()): void {
   db.update(drafts).set({ ...c, editedByUser: true, updatedAt: now }).where(eq(drafts.id, draftId)).run();
 }
 

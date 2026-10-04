@@ -43,6 +43,7 @@ export * from './pipeline/score';
 export * from './draft/schema';
 export * from './draft/prompt';
 export * from './draft/draft';
+export * from './draft/edits';
 
 export * from './eval/metrics';
 

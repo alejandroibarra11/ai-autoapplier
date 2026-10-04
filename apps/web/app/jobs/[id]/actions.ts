@@ -1,6 +1,6 @@
 'use server';
 import { revalidatePath } from 'next/cache';
-import { getJob, isBlockingFlag, latestDraft, setStatus, updateDraftContent, type DraftAnswer } from '@autoapplier/core';
+import { applyDraftEdits, getJob, isBlockingFlag, latestDraft, setStatus, updateDraftContent } from '@autoapplier/core';
 import { getWriteDb } from '../../../lib/db';
 
 function guard(jobId: number, from: string[]) {
@@ -21,8 +21,13 @@ export async function saveDraft(formData: FormData) {
   const { db } = guard(jobId, ['draft_ready']);
   const draft = latestDraft(db, jobId);
   if (!draft) throw new Error('No draft');
-  const answers: DraftAnswer[] = draft.answers.map((a) => (a.source === 'answers' ? a : { ...a, answer: String(formData.get(`answer:${a.questionId}`) ?? a.answer) }));
-  updateDraftContent(db, draft.id, { coverLetter: String(formData.get('coverLetter') ?? draft.coverLetter), answers });
+  const field = (k: string) => { const v = formData.get(k); return v === null ? undefined : String(v); };
+  // Server-side rules (fixed answers only accept one of the question's options) live in applyDraftEdits.
+  const edited = applyDraftEdits(draft, {
+    coverLetter: field('coverLetter'),
+    answers: Object.fromEntries(draft.answers.map((a) => [a.questionId, field(`answer:${a.questionId}`)])),
+  });
+  updateDraftContent(db, draft.id, edited);
   done(jobId);
 }
 

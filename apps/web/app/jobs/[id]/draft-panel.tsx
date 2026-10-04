@@ -1,4 +1,4 @@
-import { isBlockingFlag, type DraftRow, type JobRow } from '@autoapplier/core';
+import { isBlockingFlag, needsOptionFix, type DraftRow, type JobRow } from '@autoapplier/core';
 import { approveDraft, markApplied, regenerateDraft, saveDraft, shortlistJob, skipJob } from './actions';
 
 export function DraftPanel({ job, draft }: { job: JobRow; draft: DraftRow | undefined }) {
@@ -21,12 +21,26 @@ export function DraftPanel({ job, draft }: { job: JobRow; draft: DraftRow | unde
       <form action={saveDraft}>
         <input type="hidden" name="jobId" value={job.id} />
         <label>Cover letter<textarea name="coverLetter" defaultValue={draft.coverLetter} rows={10} readOnly={!editable} style={{ width: '100%' }} /></label>
-        {draft.answers.map((a) => (
-          <label key={a.questionId} style={{ display: 'block', marginTop: 8 }}>
-            {a.label} <span className="muted">({a.source === 'answers' ? 'fixed' : 'generated'})</span>
-            <textarea name={`answer:${a.questionId}`} defaultValue={a.answer} rows={a.answer.length > 80 ? 4 : 1} readOnly={!editable || a.source === 'answers'} style={{ width: '100%' }} />
-          </label>
-        ))}
+        {draft.answers.map((a) => {
+          const q = draft.questions.find((x) => x.id === a.questionId);
+          const opts = editable && needsOptionFix(q, a.answer, draft.flags) ? (q?.options ?? null) : null;
+          return (
+            <label key={a.questionId} style={{ display: 'block', marginTop: 8 }}>
+              {a.label} <span className="muted">({a.source === 'answers' ? 'fixed' : 'generated'})</span>
+              {opts ? (
+                <>
+                  <span className="muted"> — “{a.answer}” is not an option; pick one:</span>
+                  <select name={`answer:${a.questionId}`} defaultValue={opts.includes(a.answer) ? a.answer : ''} style={{ width: '100%' }}>
+                    <option value="" disabled>— choose —</option>
+                    {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </>
+              ) : (
+                <textarea name={`answer:${a.questionId}`} defaultValue={a.answer} rows={a.answer.length > 80 ? 4 : 1} readOnly={!editable || a.source === 'answers'} style={{ width: '100%' }} />
+              )}
+            </label>
+          );
+        })}
         {editable && <button>💾 Save</button>}
       </form>
       {editable && (

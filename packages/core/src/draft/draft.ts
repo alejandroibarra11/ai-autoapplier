@@ -23,7 +23,7 @@ export interface DraftResult { coverLetter: string; answers: DraftAnswer[]; cvSe
 const isChoice = (q: FormQuestion) => q.type === 'select' || q.type === 'multiselect' || (q.type === 'boolean' && !!q.options);
 
 /** Canonical option text for a generated choice answer, or null when any part is not an option. */
-function canonicalChoice(q: FormQuestion, answer: string): string | null {
+export function canonicalChoice(q: FormQuestion, answer: string): string | null {
   const opts = q.options ?? [];
   const parts = q.type === 'multiselect' ? answer.split(';').map((s) => s.trim()) : [answer.trim()];
   const mapped = parts.map((p) => opts.find((o) => o.toLowerCase() === p.toLowerCase()));
