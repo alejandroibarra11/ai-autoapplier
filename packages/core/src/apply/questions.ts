@@ -2,7 +2,7 @@ import type { PageOpener } from '../browser';
 import type { ApplyTarget, FormQuestion } from './types';
 import { COMMON_QUESTIONS } from './common';
 import { fetchGreenhouseQuestions } from './greenhouse-questions';
-import { normalizeFormFields } from './form-fields';
+import { looksUnlabeled, normalizeFormFields } from './form-fields';
 
 function formUrl(t: ApplyTarget): string | null {
   if (!t.atsToken || !t.atsJobId) return null;
@@ -19,7 +19,9 @@ export async function extractQuestions(
     const url = formUrl(t);
     if (url && opener) {
       const qs = normalizeFormFields(await opener.readForm(url));
-      if (qs.some((q) => q.type !== 'identity')) return qs;
+      const real = qs.filter((q) => q.type !== 'identity');
+      // Safety net: a scraped form with unlabeled fields would produce nonsense drafts; use the common set instead.
+      if (real.length && !real.some(looksUnlabeled)) return qs;
     }
   } catch {
     // fall through to common questions

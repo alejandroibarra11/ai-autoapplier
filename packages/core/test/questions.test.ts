@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseGreenhouseQuestions } from '../src/apply/greenhouse-questions';
-import { normalizeFormFields } from '../src/apply/form-fields';
+import { normalizeFormFields, looksUnlabeled, type RawField } from '../src/apply/form-fields';
 import { COMMON_QUESTIONS } from '../src/apply/common';
 
 const gh = JSON.parse(readFileSync(join(__dirname, 'fixtures/greenhouse-questions.json'), 'utf8'));
@@ -62,6 +62,62 @@ describe('normalizeFormFields', () => {
       { name: 'b', label: 'B', tag: 'input', inputType: 'text', required: false },
       { name: 'b', label: 'B', tag: 'input', inputType: 'text', required: false },
     ]).map((q) => q.id)).toEqual(['b']);
+  });
+});
+
+describe('normalizeFormFields (ATS cleanup)', () => {
+  const f = (name: string, label: string, extra: Partial<RawField> = {}): RawField => ({ name, label, tag: 'input', inputType: 'text', required: false, ...extra });
+  it('groups radios by name into one select with each input label as option', () => {
+    const qs = normalizeFormFields([
+      f('cards[x][field3]', 'Highest education?', { inputType: 'radio', required: true, optionLabel: 'High school' }),
+      f('cards[x][field3]', 'Highest education?', { inputType: 'radio', required: true, optionLabel: 'Bachelor' }),
+      f('other', 'Other question'),
+    ]);
+    expect(qs).toEqual([
+      { id: 'cards[x][field3]', label: 'Highest education?', type: 'select', required: true, options: ['High school', 'Bachelor'] },
+      { id: 'other', label: 'Other question', type: 'text', required: false },
+    ]);
+  });
+  it('groups multiple checkboxes into a multiselect and keeps a lone checkbox boolean', () => {
+    const qs = normalizeFormFields([
+      f('langs', 'Languages', { inputType: 'checkbox', optionLabel: 'English' }),
+      f('langs', 'Languages', { inputType: 'checkbox', optionLabel: 'Spanish' }),
+      f('consent', 'I agree', { inputType: 'checkbox' }),
+    ]);
+    expect(qs.map((q) => [q.type, q.options])).toEqual([['multiselect', ['English', 'Spanish']], ['boolean', undefined]]);
+  });
+  it('drops unlabeled and raw-id fields', () => {
+    expect(normalizeFormFields([
+      f('cards[a][field0]', 'cards[a][field0]', { tag: 'textarea' }),
+      f('3a4f61e5-718f-4e88-b2e3-0f4244ffe604', '3a4f61e5-718f-4e88-b2e3-0f4244ffe604'),
+      f('q1', '3a4f61e5-718f-4e88-b2e3'),
+      f('q2', 'urls[Github]'),
+      f('q3', 'Real question?'),
+    ]).map((q) => q.id)).toEqual(['q3']);
+  });
+  it('drops captcha, EEOC and other Ashby system fields but keeps name/email', () => {
+    expect(normalizeFormFields([
+      f('g-recaptcha-response', 'g-recaptcha-response', { tag: 'textarea' }),
+      f('h-captcha-response', 'Captcha'),
+      f('abc__systemfield_eeoc_gender', 'Gender', { inputType: 'radio', optionLabel: 'Male' }),
+      f('race', 'Race'),
+      f('eth', 'Ethnicity'),
+      f('vet', 'Veteran Status'),
+      f('dis', 'Disability status'),
+      f('_systemfield_location', 'Location'),
+      f('_systemfield_name', 'Name'),
+      f('_systemfield_email', 'Email', { inputType: 'email' }),
+      f('trace', 'Experience with traceability or embracing change?'),
+    ]).map((q) => q.id)).toEqual(['_systemfield_name', '_systemfield_email', 'trace']);
+  });
+});
+
+describe('looksUnlabeled', () => {
+  it('flags labels equal to the id or shaped like raw ids', () => {
+    expect(looksUnlabeled({ id: 'a1', label: 'a1' })).toBe(true);
+    expect(looksUnlabeled({ id: 'x', label: 'cards[x][field0]' })).toBe(true);
+    expect(looksUnlabeled({ id: 'x', label: '84467dbc-cb9f-41af-8f8e-7e88768f9f75' })).toBe(true);
+    expect(looksUnlabeled({ id: 'x', label: 'Why us?' })).toBe(false);
   });
 });
 

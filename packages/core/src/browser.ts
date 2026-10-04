@@ -46,18 +46,33 @@ export function makePageOpener(session: BrowserSession, timeoutMs: number): Page
         return await page.$$eval('input[name], textarea[name], select[name]', (els) => els.map((el) => {
           const e = el as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
           const tag = e.tagName.toLowerCase() as 'input' | 'textarea' | 'select';
+          // No named function bindings in here: tsx (esbuild keepNames) would inject a `__name` helper
+          // that does not exist in the page context.
+          const inputType = tag === 'input' ? ((e as HTMLInputElement).type || 'text') : undefined;
+          const choice = inputType === 'radio' || inputType === 'checkbox';
           const byFor = e.id ? document.querySelector(`label[for="${CSS.escape(e.id)}"]`) : null;
           const wrap = e.closest('label');
-          const aria = e.getAttribute('aria-label');
-          let label = (byFor?.textContent ?? '').trim();
-          if (!label && wrap) label = Array.from(wrap.childNodes).filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent ?? '').join(' ').trim();
-          if (!label) label = (aria ?? '').trim();
-          if (!label) label = e.name;
-          const field: { name: string; label: string; tag: typeof tag; inputType: string | undefined; required: boolean; options?: string[] } = {
-            name: e.name, label: label.replace(/\s+/g, ' ').replace(/\*$/, '').trim(), tag,
-            inputType: tag === 'input' ? ((e as HTMLInputElement).type || 'text') : undefined,
+          // Question heading from the surrounding field container (Lever cards, Ashby field entries, fieldsets).
+          const lever = e.closest('.application-question');
+          const box = e.closest('fieldset, [class*="field-entry"], [class*="fieldEntry"]');
+          const boxHeads = box ? [box.querySelector(':scope > legend'), box.querySelector('[class*="question-title"]'), ...Array.from(box.querySelectorAll('label, [class*="label"]'))]
+            .filter((n): n is Element => !!n && n !== byFor && n !== wrap && !n.contains(e)) : [];
+          const [leverHead, boxHead, forText, wrapAll, wrapText, aria, value] = [
+            lever?.querySelector('.application-label')?.textContent, boxHeads[0]?.textContent, byFor?.textContent, wrap?.textContent,
+            wrap ? Array.from(wrap.childNodes).filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent ?? '').join(' ') : '',
+            e.getAttribute('aria-label'), (e as HTMLInputElement).value,
+          ].map((t) => (t ?? '').replace(/\s+/g, ' ').replace(/[*✱]+\s*$/, '').trim());
+          const heading = leverHead || boxHead;
+          const ownLabel = forText || (choice ? wrapAll : wrapText);
+          const label = (choice ? heading || ownLabel : ownLabel || heading) || aria || e.name;
+          const field: { name: string; label: string; tag: typeof tag; inputType: string | undefined; required: boolean; options?: string[]; optionLabel?: string } = {
+            name: e.name, label, tag, inputType,
             required: e.required || e.getAttribute('aria-required') === 'true',
           };
+          if (choice && heading) {
+            const opt = ownLabel || value;
+            if (opt && opt !== 'on') field.optionLabel = opt;
+          }
           if (tag === 'select') field.options = Array.from((e as HTMLSelectElement).options).filter((o) => o.value !== '').map((o) => (o.textContent ?? '').trim());
           return field;
         }));
