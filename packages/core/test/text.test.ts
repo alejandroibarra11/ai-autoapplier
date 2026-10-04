@@ -24,4 +24,9 @@ describe('keys', () => {
   it('normalizeForMatch collapses whitespace and lowercases', () => {
     expect(normalizeForMatch('  Remote\n  LATAM  ')).toBe('remote latam');
   });
+  it('normalizeForMatch folds curly quotes, en/em dashes and NBSP', () => {
+    expect(normalizeForMatch('We\u2019re \u201cremote\u201d \u2018first\u2019')).toBe('we\'re "remote" \'first\'');
+    expect(normalizeForMatch('Remote \u2013 LATAM \u2014 Mexico')).toBe('remote - latam - mexico');
+    expect(normalizeForMatch('Remote\u00a0-\u00a0LATAM')).toBe('remote - latam');
+  });
 });

@@ -33,5 +33,8 @@ export function dedupeKey(company: string, title: string, locationText: string):
 }
 
 export function normalizeForMatch(s: string): string {
-  return s.toLowerCase().replace(/\s+/g, ' ').trim();
+  return s.toLowerCase()
+    .replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-').replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ').trim();
 }
