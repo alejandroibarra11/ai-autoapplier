@@ -27,3 +27,4 @@ output/
 # agent scratch
 .superpowers/
 *.tsbuildinfo
+.worktrees/
