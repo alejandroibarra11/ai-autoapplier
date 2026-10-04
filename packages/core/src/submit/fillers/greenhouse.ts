@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 import type { Page } from 'playwright';
 import type { AtsFiller, FillEntry, FillPlan, FilledReport, SubmitOutcome } from '../types';
-import { chooseCombobox, chooseNative, clickChoiceButton, fillText, setFile } from '../dom';
+import { chooseCombobox, chooseNative, clickChoiceButton, fillText, oneLine, setFile } from '../dom';
 import { runFill, runSubmit } from './common';
 
 const IDENTITY_TEXT: Record<string, string> = {
@@ -35,10 +35,20 @@ async function openCoverLetterText(page: Page): Promise<boolean> {
   }
 }
 
-async function fillIdentity(page: Page, plan: FillPlan, e: FillEntry): Promise<boolean | null> {
+/** Plain text inputs written during this fill: re-read at the end to catch a late resume-parse / re-render wipe. */
+type Written = { fieldId: string; selector: string; value: string; want: string };
+
+/** fillText, remembering what the input actually holds afterwards. */
+async function typed(page: Page, selector: string, e: FillEntry, written: Written[]): Promise<boolean> {
+  const ok = await fillText(page, selector, e.value);
+  if (ok) written.push({ fieldId: e.fieldId, selector, value: e.value, want: await page.locator(selector).first().inputValue() });
+  return ok;
+}
+
+async function fillIdentity(page: Page, plan: FillPlan, e: FillEntry, written: Written[]): Promise<boolean | null> {
   if (!e.value.trim()) return null;
   const text = IDENTITY_TEXT[e.fieldId];
-  if (text) return (await page.locator(text).count()) ? fillText(page, text, e.value) : null;
+  if (text) return (await page.locator(text).count()) ? typed(page, text, e, written) : null;
   switch (e.fieldId) {
     case 'identity:country': return (await page.locator('#country').count())
       // Option labels are "Mexico +52" and the widget then only shows the dial code, so match without it and verify by code.
@@ -65,17 +75,17 @@ async function fillIdentity(page: Page, plan: FillPlan, e: FillEntry): Promise<b
       return chooseCombobox(page, '#candidate-location', city, { allowContains: true, accept: (t) => norm(lastSegment(t)) === want });
     }
     case 'identity:resume': return (await page.locator('#resume').count()) ? setFile(page, '#resume', e.value) : null;
-    case 'identity:coverLetter': return (await openCoverLetterText(page)) ? fillText(page, COVER_TEXT, e.value) : null;
+    case 'identity:coverLetter': return (await openCoverLetterText(page)) ? typed(page, COVER_TEXT, e, written) : null;
     default: return null;
   }
 }
 
-async function fillCustom(page: Page, e: FillEntry): Promise<boolean | null> {
+async function fillCustom(page: Page, e: FillEntry, written: Written[]): Promise<boolean | null> {
   const s = sel(e.fieldId);
   if (!(await page.locator(s).count())) return null;
   const tag = await page.locator(s).first().evaluate((el) => el.tagName.toLowerCase());
   switch (e.kind) {
-    case 'text': case 'textarea': return fillText(page, s, e.value);
+    case 'text': case 'textarea': return typed(page, s, e, written);
     case 'file': return setFile(page, s, e.value);
     case 'checkbox': {
       try { await page.locator(s).first().setChecked(/^(true|yes|1|on)$/i.test(e.value), { timeout: 5000 }); return true; } catch { return false; }
@@ -102,7 +112,24 @@ export const greenhouseFiller: AtsFiller = {
   formUrl: (t) => t.url,
 
   async fill(page: Page, plan: FillPlan): Promise<FilledReport> {
-    return runFill(page, plan, plan.entries, (e) => (e.fieldId.startsWith('identity:') ? fillIdentity(page, plan, e) : fillCustom(page, e)));
+    // The resume goes first: Greenhouse parses it and may re-render / overwrite the text fields afterwards.
+    const order = [...plan.entries.filter((x) => x.fieldId === 'identity:resume'), ...plan.entries.filter((x) => x.fieldId !== 'identity:resume')];
+    const written: Written[] = [];
+    const read = (sel: string) => page.locator(sel).first().inputValue().catch(() => null);
+    return runFill(page, plan, order, async (e) => {
+      const res = e.fieldId.startsWith('identity:') ? await fillIdentity(page, plan, e, written) : await fillCustom(page, e, written);
+      if (e.fieldId === 'identity:resume' && res) await page.waitForTimeout(1500); // let the parse / autofill land before typing anything
+      return res;
+    }, undefined, async (r) => {
+      await page.waitForTimeout(500);
+      for (const w of written) {
+        if (!r.filled.includes(w.fieldId) || (await read(w.selector)) === w.want) continue;
+        // Wiped after we typed it: re-type once with the same sanitization (fill only, no key presses) and re-read.
+        await page.locator(w.selector).first().fill(oneLine(w.value), { timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(500);
+        if ((await read(w.selector)) !== w.want) { r.filled.splice(r.filled.indexOf(w.fieldId), 1); r.failed.push(w.fieldId); }
+      }
+    });
   },
 
   async submit(page: Page, timeoutMs: number): Promise<SubmitOutcome> {
