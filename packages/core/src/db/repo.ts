@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm';
 import type { Db } from './client';
 import { companies, drafts, jobEvents, jobs, llmUsage, scores, submissions } from './schema';
 import type { FillPlan, SubmissionResult } from '../submit/types';
@@ -224,7 +224,7 @@ export function updateSubmission(
   db.update(submissions).set(patch).where(eq(submissions.id, id)).run();
 }
 
-const realSubmission = and(eq(submissions.dryRun, false), inArray(submissions.result, ['submitted', 'failed']));
+const realSubmission = and(eq(submissions.dryRun, false), isNotNull(submissions.submittedAt));
 
 export function countRealSubmissionsSince(db: Db, since: Date): number {
   return db.select({ n: sql<number>`count(*)` }).from(submissions)

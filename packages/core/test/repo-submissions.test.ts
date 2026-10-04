@@ -27,6 +27,13 @@ describe('submissions repo', () => {
     expect(s.plan.entries[0]!.value).toBe('a@b.c');
     expect(s.dryRun).toBe(true);
   });
+  it('counts a clicked row (dryRun false, submittedAt set) regardless of result', () => {
+    const { db, jobs } = seed();
+    const t = new Date('2026-10-04T12:00:00Z');
+    const a = insertSubmission(db, { jobId: jobs[0]!.id, plan, fillShot: null, result: 'filled' });
+    updateSubmission(db, a, { dryRun: false, submittedAt: t });
+    expect(countRealSubmissionsSince(db, new Date('2026-10-04T00:00:00Z'))).toBe(1);
+  });
   it('counts only real submissions for rate limits', () => {
     const { db, jobs } = seed();
     const t = new Date('2026-10-04T12:00:00Z');

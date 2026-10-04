@@ -72,7 +72,18 @@ describe('demographic helpers', () => {
   });
 });
 
+describe('demographic detection (word-bounded)', () => {
+  it.each(['How do you embrace feedback?', 'Graceful degradation experience', 'Based in Sussex?'])('%s is not demographic', (l) => expect(isDemographic(l)).toBe(false));
+  it('"Disability insurance experience" still matches (accepted, safe direction)', () => expect(isDemographic('Disability insurance experience')).toBe(true));
+  it.each(['Do you identify as LGBTQ+?', 'Age', 'Preferred pronouns', 'Date of birth'])('%s is demographic', (l) => expect(isDemographic(l)).toBe(true));
+});
+
 describe('verifyFill', () => {
+  it('flags planned non-identity entries the filler never reported', () => {
+    const p = buildFillPlan({ questions: qs.slice(0, 3), draft, answers, profile });
+    expect(verifyFill(p, { filled: ['q_auth'], notFound: [], failed: [], requiredEmpty: [] })).toEqual(['field not reported: Why us?']);
+  });
+
   const plan = buildFillPlan({ questions: qs.slice(0, 3), draft, answers, profile });
   it('accepts a clean report', () => expect(verifyFill(plan, { filled: ['q_auth', 'q_why'], notFound: ['identity:github'], failed: [], requiredEmpty: [] })).toEqual([]));
   it('flags missing planned questions, failures and empty required fields', () => {

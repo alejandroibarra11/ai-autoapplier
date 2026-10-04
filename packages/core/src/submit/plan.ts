@@ -4,7 +4,7 @@ import type { FormQuestion } from '../apply/types';
 import type { DraftRow } from '../db/repo';
 import type { EntryKind, FillEntry, FillPlan, IdentityKey } from './types';
 
-export const DEMOGRAPHIC = /gender|sex\b|race|ethnic|hispanic|latin[oa]|veteran|disabilit|sexual orientation|pronoun|transgender/i;
+export const DEMOGRAPHIC = /\b(gender|sex|race|racial|ethnicity|ethnic|hispanic|latin[oax]|veteran|disability|disabilities|sexual orientation|pronouns?|transgender|lgbtq\+?|age|date of birth)\b/i;
 const DECLINE = /decline|prefer not|don'?t wish|do not wish|not to (say|answer|disclose)|choose not/i;
 
 export function isDemographic(label: string): boolean {
