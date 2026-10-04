@@ -10,21 +10,14 @@ import { guardFill, chooseCombobox, fillText } from '../src/submit/dom';
 import { fillerFor } from '../src/submit/fillers';
 import { takeShot, pngSize } from '../src/submit/screenshot';
 import type { FillPlan } from '../src/submit/types';
+import { openFixture } from './fill-helpers';
 
 let browser: Browser;
 const dir = mkdtempSync(join(tmpdir(), 'aa-fill-'));
 const cv = join(dir, 'cv.pdf'); writeFileSync(cv, '%PDF-1.4 test');
 const posted: string[] = [];
 
-async function open(fixture: string, query = '', base = 'https://boards.test'): Promise<Page> {
-  const page = await browser.newPage();
-  await page.route(`${base}/**`, async (route) => {
-    if (route.request().method() === 'POST') { posted.push(route.request().postData() ?? ''); return route.fulfill({ status: 200, body: '{}' }); }
-    return route.fulfill({ status: 200, contentType: 'text/html', body: readFileSync(join(__dirname, 'fixtures', fixture), 'utf8') });
-  });
-  await page.goto(`${base}/acme/jobs/1${query}`);
-  return page;
-}
+const open = (fixture: string, query = '', base = 'https://boards.test'): Promise<Page> => openFixture(browser, posted, fixture, query, base);
 const e = (fieldId: string, value: string, kind: FillPlan['entries'][number]['kind'] = 'text', required = true, source: FillPlan['entries'][number]['source'] = 'identity') =>
   ({ fieldId, label: fieldId, kind, value, source, required });
 

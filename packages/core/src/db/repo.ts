@@ -254,3 +254,21 @@ export function listJobsForFilling(db: Db, limit: number): JobRow[] {
     .where(and(eq(jobs.status, 'ready_to_apply'), inArray(jobs.resolvedKind, ['greenhouse', 'lever', 'ashby'])))
     .orderBy(asc(jobs.updatedAt), asc(jobs.id)).limit(limit).all();
 }
+
+/** Jobs that have sat in `status` since before `olderThan`. */
+export function listStaleByStatus(db: Db, status: JobStatus, olderThan: Date): JobRow[] {
+  return db.select().from(jobs).where(and(eq(jobs.status, status), lt(jobs.updatedAt, olderThan))).orderBy(asc(jobs.id)).all();
+}
+
+/**
+ * Atomic status transition: moves the job from `from` to `to` only if it is still in `from` (conditional UPDATE in an
+ * immediate transaction). Returns false when another caller got there first.
+ */
+export function claimStatus(db: Db, jobId: number, from: JobStatus, to: JobStatus, note: string | null = null, now = new Date()): boolean {
+  return db.transaction((tx) => {
+    const r = tx.update(jobs).set({ status: to, updatedAt: now }).where(and(eq(jobs.id, jobId), eq(jobs.status, from))).run();
+    if (r.changes !== 1) return false;
+    tx.insert(jobEvents).values({ jobId, fromStatus: from, toStatus: to, note, at: now }).run();
+    return true;
+  }, { behavior: 'immediate' });
+}
