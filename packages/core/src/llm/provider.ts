@@ -5,6 +5,7 @@ export interface LLMUsage { provider: 'anthropic' | 'openai'; model: string; inp
 
 export interface StructuredRequest<T> {
   system: string; user: string; schema: z.ZodType<T>; schemaName: string; maxTokens: number;
+  effort?: 'low' | 'medium' | 'high';
 }
 
 export interface LLMProvider {
