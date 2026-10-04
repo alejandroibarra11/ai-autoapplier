@@ -3,7 +3,7 @@ import type { LLMProvider, LLMUsage } from '../llm/provider';
 import { LLMParseError } from '../llm/provider';
 import { normalizeForMatch } from '../text';
 import { ScoreSchema, type ScorePayload } from './schema';
-import { buildScoringSystem, buildScoringUser, jobContextText } from './prompt';
+import { buildScoringSystem, buildScoringUser, evidenceText, jobContextText } from './prompt';
 
 const MIN_FRAGMENT = 6;
 
@@ -12,7 +12,14 @@ export function evidenceFound(evidence: string, text: string): boolean {
   const cleaned = evidence.trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, '');
   const fragments = cleaned.split(/\s*(?:\.\.\.|…)\s*/).map(normalizeForMatch).filter(Boolean);
   if (fragments.length === 0) return false;
-  return fragments.every((f) => f.length >= MIN_FRAGMENT && hay.includes(f));
+  let pos = 0;
+  for (const f of fragments) {
+    if (f.length < MIN_FRAGMENT) return false;
+    const i = hay.indexOf(f, pos);
+    if (i < 0) return false;
+    pos = i + f.length;
+  }
+  return true;
 }
 
 export function applyEvidenceCheck(s: ScorePayload, text: string): ScorePayload {
@@ -41,7 +48,7 @@ export async function scoreJob(
       const { data, usage } = await provider.generateStructured(model, req);
       onUsage(usage);
       const clamped = { ...data, fitScore: Math.max(0, Math.min(100, Math.round(data.fitScore))) };
-      return applyEvidenceCheck(clamped, context);
+      return applyEvidenceCheck(clamped, evidenceText(job));
     } catch (e) {
       lastErr = e;
       if (e instanceof LLMParseError) { if (e.usage) onUsage(e.usage); continue; }

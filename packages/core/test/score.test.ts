@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
 import { applyEvidenceCheck, decide, evidenceFound } from '../src/score/score';
-import { jobContextText, MAX_POSTING_CHARS } from '../src/score/prompt';
+import { evidenceText, jobContextText, MAX_POSTING_CHARS } from '../src/score/prompt';
 import { runScore } from '../src/pipeline/score';
 import { LLMParseError, type LLMProvider, type StructuredRequest } from '../src/llm/provider';
 import type { ScorePayload } from '../src/score/schema';
@@ -24,6 +24,9 @@ describe('evidenceFound', () => {
   });
   it('supports ellipsis-joined fragments', () => {
     expect(evidenceFound('We hire contractors ... Latin America', text)).toBe(true);
+  });
+  it('requires ellipsis fragments in order', () => {
+    expect(evidenceFound('work from anywhere ... Latin America', 'customers in Latin America. work from anywhere in the US')).toBe(false);
   });
   it('rejects invented or too-short quotes', () => {
     expect(evidenceFound('open to candidates in Mexico', text)).toBe(false);
@@ -48,6 +51,16 @@ describe('applyEvidenceCheck / decide', () => {
     expect(decide({ ...base, fitScore: 64 }, 65)).toBe('low_score');
     expect(decide({ ...base, eligibility: 'unlikely' }, 65)).toBe('ineligible');
     expect(decide({ ...base, eligibility: 'ineligible' }, 65)).toBe('ineligible');
+  });
+});
+
+describe('evidenceText', () => {
+  it('excludes synthetic header lines', () => {
+    const text = evidenceText(makeJob());
+    expect(evidenceFound('Title: Senior AI Engineer', text)).toBe(false);
+    expect(evidenceFound('Compensation: not stated', text)).toBe(false);
+    expect(evidenceFound('Location: Remote - LATAM', text)).toBe(true);
+    expect(evidenceFound('Location: not stated', evidenceText({ ...makeJob(), locationText: '' }))).toBe(false);
   });
 });
 
@@ -125,6 +138,25 @@ describe('runScore', () => {
     const r = await runScore({ db, cfg, provider, profileText: 'p', now });
     expect(provider.calls).toBe(2);
     expect(r).toEqual({ scored: 0, failed: 2, capped: false });
+    for (const j of listJobsByStatus(db, ['score_failed'])) expect(j.scoreAttempts).toBe(0);
+  });
+
+  it('stops after 3 consecutive non-parse errors', async () => {
+    const db = testDb();
+    seedPassed(db, 5);
+    const provider = new FakeProvider([new Error('401')]);
+    const r = await runScore({ db, cfg, provider, profileText: 'p', now });
+    expect(provider.calls).toBe(3);
+    expect(r.failed).toBe(3);
+  });
+
+  it('records usage attached to parse errors', async () => {
+    const db = testDb();
+    seedPassed(db);
+    const usage = { provider: 'anthropic' as const, model: cfg.scoring.model, inputTokens: 3000, outputTokens: 300 };
+    const r = await runScore({ db, cfg, provider: new FakeProvider([new LLMParseError('bad', usage)]), profileText: 'p', now });
+    expect(r.failed).toBe(1);
+    expect(spendSince(db, new Date('2026-10-03T00:00:00Z'))).toBeCloseTo(0.009);
   });
 
   it('stops when the daily spend cap is reached', async () => {
