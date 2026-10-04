@@ -26,6 +26,7 @@ export function applyRules(job: NormalizedJob, cfg: Config, now = new Date()): R
   if (excluded) return reject(`title: excluded "${excluded}"`);
 
   const ageDays = (now.getTime() - job.postedAt.getTime()) / 86_400_000;
+  if (!Number.isFinite(ageDays)) return reject('age: invalid postedAt');
   if (ageDays > cfg.maxAgeDays) return reject(`age: ${Math.floor(ageDays)} days old`);
 
   const fullText = `${job.locationText}\n${job.description}`;

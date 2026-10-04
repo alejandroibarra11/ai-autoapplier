@@ -35,6 +35,10 @@ describe('applyRules', () => {
     expect(ok({ postedAt: new Date('2026-09-20T00:00:00Z') }).reason).toMatch(/^age/);
   });
 
+  it('rejects invalid postedAt dates', () => {
+    expect(ok({ postedAt: new Date('nope') }).reason).toBe('age: invalid postedAt');
+  });
+
   it('rejects explicit US authorization requirements', () => {
     const r = ok({ description: 'Candidates must be authorized to work in the United States without sponsorship.' });
     expect(r.pass).toBe(false);
