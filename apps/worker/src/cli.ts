@@ -65,7 +65,29 @@ if (cmd === 'once') {
     console.log(`false positives (would waste an application): ${m.falsePositives.join(', ') || 'none'}`);
     console.log(`false negatives (missed eligible jobs): ${m.falseNegatives.join(', ') || 'none'}`);
   }
+} else if (cmd === 'draft') {
+  const id = Number(process.argv[3]);
+  const { getJob, setStatus, runDrafting, resolveApplyTarget, extractQuestions, openBrowser, makePageOpener, renderPdf, latestDraft } = await import('@autoapplier/core');
+  const { join } = await import('node:path');
+  const job = Number.isInteger(id) ? getJob(app.db, id) : null;
+  if (!job) { console.log(`job ${process.argv[3]} not found`); process.exitCode = 1; }
+  else {
+    if (job.status !== 'shortlisted') setStatus(app.db, id, 'shortlisted', 'cli draft');
+    const session = await openBrowser({ headless: app.cfg.browser.headless, userDataDir: join(app.root, 'data/browser') });
+    const opener = makePageOpener(session, app.cfg.browser.timeoutMs);
+    try {
+      const r = await runDrafting({
+        db: app.db, cfg: app.cfg, provider: createProvider(app.cfg.drafting.provider), profile: app.profile, answers: app.answers,
+        cvDir: join(app.root, 'data/cv'), limit: 50, onlyJobId: id,
+        resolve: (j) => resolveApplyTarget(j, opener), questions: (t) => extractQuestions(t, opener),
+        renderPdf: (html, out) => renderPdf(session, html, out),
+      });
+      console.log(r);
+      const d = latestDraft(app.db, id);
+      if (d) console.log(JSON.stringify({ kind: getJob(app.db, id)?.resolvedKind, flags: d.flags, cv: d.cvPdfPath, coverLetter: d.coverLetter, answers: d.answers }, null, 2));
+    } finally { await session.close(); }
+  }
 } else {
-  console.log('usage: pnpm --filter @autoapplier/worker cli <once|export-eval [n]|eval [model]>');
+  console.log('usage: pnpm --filter @autoapplier/worker cli <once|export-eval [n]|eval [model]|draft <jobId>>');
   process.exitCode = 1;
 }

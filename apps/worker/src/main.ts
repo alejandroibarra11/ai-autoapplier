@@ -1,7 +1,14 @@
+import { join } from 'node:path';
 import cron from 'node-cron';
-import { createProvider } from '@autoapplier/core';
+import { InputFile } from 'grammy';
+import {
+  createProvider, extractQuestions, getJob, latestDraft, makePageOpener, openBrowser, renderPdf as renderPdfWith,
+  resolveApplyTarget, runDrafting, type BrowserSession,
+} from '@autoapplier/core';
+import { createDraftLoop } from './draft-loop';
+import { notifyDrafts, sendReady, type DraftSender } from './drafts';
 import { bootstrap } from './bootstrap';
-import { logSummary, runPipelineOnce } from './pipeline';
+import { createDailyGate, logSummary, runPipelineOnce } from './pipeline';
 import { createBot, type MessageSender } from './telegram';
 import { superviseBot } from './bot-supervisor';
 
@@ -9,7 +16,15 @@ const app = bootstrap();
 const { telegramToken, chatId } = app.env;
 if (!telegramToken) throw new Error('TELEGRAM_BOT_TOKEN missing in .env');
 
-const bot = createBot(telegramToken, chatId ?? '', app.db);
+const bot = createBot(telegramToken, chatId ?? '', app.db, async (jobId) => {
+  const job = getJob(app.db, jobId);
+  const d = job && latestDraft(app.db, jobId);
+  if (job && d && chatId) await sendReady(draftSender, chatId, job, d);
+});
+const draftSender: DraftSender = {
+  sendMessage: (c, t, o) => bot.api.sendMessage(c, t, o as never),
+  sendDocument: (c, p, caption) => bot.api.sendDocument(c, new InputFile(p), { caption }),
+};
 const sender: MessageSender = { sendMessage: (c, t, o) => bot.api.sendMessage(c, t, o as never) };
 const provider = createProvider(app.cfg.scoring.provider);
 
@@ -32,6 +47,35 @@ async function tick() {
   }
 }
 
+const draftProvider = createProvider(app.cfg.drafting.provider);
+const draftCapGate = createDailyGate();
+let browser: BrowserSession | null = null;
+async function getBrowser(): Promise<BrowserSession> {
+  browser ??= await openBrowser({ headless: app.cfg.browser.headless, userDataDir: join(app.root, 'data/browser') });
+  return browser;
+}
+const draftLoop = createDraftLoop({
+  run: async () => {
+    const session = await getBrowser().catch((e) => { console.error('[draft] browser unavailable:', e instanceof Error ? e.message : e); return null; });
+    const opener = session ? makePageOpener(session, app.cfg.browser.timeoutMs) : null;
+    const r = await runDrafting({
+      db: app.db, cfg: app.cfg, provider: draftProvider, profile: app.profile, answers: app.answers,
+      cvDir: join(app.root, 'data/cv'),
+      resolve: (job) => resolveApplyTarget(job, opener),
+      questions: (t) => extractQuestions(t, opener),
+      renderPdf: async (html, out) => { if (!session) throw new Error('no browser'); await renderPdfWith(session, html, out); },
+    });
+    if (r.drafted || r.failed || r.capped) console.log(`[draft] drafted=${r.drafted} failed=${r.failed} capped=${r.capped}`);
+    if (telegramUp && chatId) {
+      if (r.capped && draftCapGate(new Date())) {
+        await draftSender.sendMessage(chatId, `⚠️ Daily drafting spend cap ($${app.cfg.drafting.dailySpendCapUsd}) reached; drafts paused until tomorrow (UTC).`).catch((e) => console.error('[draft] cap warning failed', e));
+      }
+      await notifyDrafts(draftSender, chatId, app.db);
+    }
+  },
+});
+setInterval(() => void draftLoop.tick(), app.cfg.drafting.pollSeconds * 1000);
+
 if (!chatId) console.warn('TELEGRAM_CHAT_ID missing: send /start to the bot to get it; notifications disabled until set.');
 cron.schedule(`0 */${app.cfg.pollIntervalHours} * * *`, tick);
 // First run waits for the first bot start attempt (success or failure) so it can notify if Telegram is up.
@@ -45,4 +89,4 @@ void superviseBot({
   shouldStop: () => stopping,
 }).then((r) => { if (r === 'unauthorized') console.error('[telegram] fix TELEGRAM_BOT_TOKEN in .env and restart to re-enable notifications'); });
 
-for (const sig of ['SIGINT', 'SIGTERM'] as const) process.once(sig, () => { stopping = true; void bot.stop(); process.exit(0); });
+for (const sig of ['SIGINT', 'SIGTERM'] as const) process.once(sig, () => { stopping = true; void bot.stop(); void (browser?.close() ?? Promise.resolve()).catch(() => {}).finally(() => process.exit(0)); });

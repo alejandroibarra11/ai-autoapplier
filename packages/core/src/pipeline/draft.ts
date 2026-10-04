@@ -16,7 +16,7 @@ export interface DraftStageDeps {
   resolve: (job: JobRow) => Promise<ApplyTarget>;
   questions: (t: ApplyTarget) => Promise<FormQuestion[]>;
   renderPdf: (html: string, outPath: string) => Promise<void>;
-  now?: Date; limit?: number; stepTimeoutMs?: number; save?: typeof insertDraft;
+  now?: Date; limit?: number; onlyJobId?: number; stepTimeoutMs?: number; save?: typeof insertDraft;
 }
 export interface DraftRunResult { drafted: number; failed: number; capped: boolean }
 
@@ -40,7 +40,7 @@ export async function runDrafting(d: DraftStageDeps): Promise<DraftRunResult> {
   const save = d.save ?? insertDraft;
   resetStaleDrafting(db, new Date(now.getTime() - STALE_DRAFTING_MS), now);
 
-  for (const job of listJobsForDrafting(db, d.limit ?? 5)) {
+  for (const job of listJobsForDrafting(db, d.limit ?? 5).filter((j) => d.onlyJobId === undefined || j.id === d.onlyJobId)) {
     if (spendSince(db, dayStart, 'draft') >= cfg.drafting.dailySpendCapUsd) { res.capped = true; break; }
     setStatus(db, job.id, 'drafting', null, {}, now);
 

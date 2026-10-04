@@ -16,3 +16,16 @@ Requirements: mise (Node 22), pnpm.
     pnpm web       # dashboard at http://localhost:3100
 
 Tune roles, eligibility regexes, pay floors, models and sources in `config.yaml`.
+
+## Phase 2: drafts
+
+Shortlisting a job in Telegram triggers a draft (cover letter, answers to the application questions, tailored CV PDF). Setup:
+
+    cp profile/answers.example.yaml profile/answers.yaml   # fill in; stays local
+    mise exec -- pnpm --filter @autoapplier/core exec playwright install chromium
+
+Flow: Shortlist -> draft card -> Approve -> ready message (links, CV, text) -> Mark applied. Drafts with blocking flags (unverified claim, missing answer, invalid option) cannot be approved from Telegram.
+
+Manual draft for one job (no Telegram):
+
+    pnpm --filter @autoapplier/worker cli draft <jobId>

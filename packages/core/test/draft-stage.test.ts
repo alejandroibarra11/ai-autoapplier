@@ -45,6 +45,15 @@ const deps = (db: ReturnType<typeof testDb>, provider: LLMProvider, extra = {}) 
 });
 
 describe('runDrafting', () => {
+  it('drafts only onlyJobId when set', async () => {
+    const { db, jobs } = setup(2);
+    const target = jobs[1]!.id;
+    const r = await runDrafting(deps(db, new Fake([out]), { onlyJobId: target, limit: 50 }));
+    expect(r.drafted).toBe(1);
+    expect(getJob(db, target)!.status).toBe('draft_ready');
+    expect(getJob(db, jobs[0]!.id)!.status).toBe('shortlisted');
+  });
+
   it('drafts shortlisted jobs into draft_ready with a stored draft and resolution', async () => {
     const { db, jobs } = setup();
     const r = await runDrafting(deps(db, new Fake([out])));
