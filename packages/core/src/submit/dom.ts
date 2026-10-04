@@ -167,10 +167,24 @@ const REQUIRED_EMPTY_JS = `(() => {
 
     const out = [];
     const clean = (t) => (t ?? '').replace(/\\s+/g, ' ').replace(/[*✱]+\\s*$/, '').trim();
+    // Required upload groups (Greenhouse: role=group.file-upload aria-required): attached only when a file-name chip is visible
+    // in the group (or its manual-entry textarea has text). A file set on the input proves nothing: it stays set when the upload fails.
+    const shown = (n) => { const b = n.getBoundingClientRect(); const s = getComputedStyle(n); return s.visibility !== 'hidden' && s.display !== 'none' && (b.width > 0 || b.height > 0); };
+    const groups = Array.from(document.querySelectorAll('[role="group"][aria-required="true"], .file-upload[aria-required="true"]'))
+      .filter((g) => g.classList.contains('file-upload') || g.querySelector('input[type="file"]'));
+    for (const g of groups) {
+      const chip = Array.from(g.querySelectorAll('.file-upload__filename')).some((n) => shown(n) && clean(n.textContent));
+      const manual = Array.from(g.querySelectorAll('textarea')).some((t) => t.value.trim());
+      if (chip || manual) continue;
+      const lid = g.getAttribute('aria-labelledby');
+      const lab = (lid ? document.getElementById(lid) : null) ?? g.querySelector('.upload-label, label');
+      out.push(clean(lab?.textContent) || 'file upload');
+    }
     for (const el of els) {
       const e = el;
       const type = (e.getAttribute('type') ?? '').toLowerCase();
       if (type === 'hidden' || type === 'search') continue;
+      if (type === 'file' && groups.some((g) => g.contains(e))) continue; // judged by its group above
       if (/recaptcha|captcha/i.test(e.id + ' ' + e.name + ' ' + e.className)) continue;
       if (/search/i.test(e.id + ' ' + e.className) || e.getAttribute('role') === 'searchbox') continue;
       const box = e.getBoundingClientRect();
