@@ -1,6 +1,6 @@
 import { InlineKeyboard } from 'grammy';
 import {
-  getJob, isBlockingFlag, latestDraft, listUnnotifiedDrafts, markDraftNotified, setStatus,
+  getJob, isBlockingFlag, latestDraft, listUnnotifiedDraftFailures, listUnnotifiedDrafts, markDraftFailureNotified, markDraftNotified, setStatus,
   type Db, type DraftRow, type JobRow,
 } from '@autoapplier/core';
 import { escapeHtml, type MessageSender } from './telegram';
@@ -162,3 +162,25 @@ export async function sendReady(sender: DraftSender, chatId: string, job: JobRow
   }
   if (draft.cvPdfPath) await sender.sendDocument(chatId, draft.cvPdfPath, `CV — ${job.company}`).catch(() => {});
 }
+
+export function formatDraftFailure(job: JobRow, reason: string): string {
+  const why = truncate(reason.replace(/\s+/g, ' ').trim().replace(/[.\s]+$/, ''), 160);
+  return `⚠️ Draft failed for ${escapeHtml(truncate(job.title, 100))} — ${escapeHtml(truncate(job.company, 80))}: ${escapeHtml(why)}. Retry from the dashboard (/jobs/${job.id}).`;
+}
+
+/** One Telegram notice per job that entered draft_failed; unsent notices are retried next loop. */
+export async function notifyDraftFailures(sender: MessageSender, chatId: string, db: Db, now = new Date()): Promise<number> {
+  let sent = 0;
+  for (const { job, reason } of listUnnotifiedDraftFailures(db, 10)) {
+    try {
+      await sender.sendMessage(chatId, formatDraftFailure(job, reason), { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
+    } catch (e) {
+      console.error(`[telegram] draft-failure notice failed for job #${job.id}; will retry next loop:`, e instanceof Error ? e.message : e);
+      continue;
+    }
+    markDraftFailureNotified(db, job.id, now);
+    sent++;
+  }
+  return sent;
+}
+

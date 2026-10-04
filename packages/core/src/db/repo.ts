@@ -10,7 +10,7 @@ export type JobRow = typeof jobs.$inferSelect;
 export type CompanyRow = typeof companies.$inferSelect;
 export type JobEventRow = typeof jobEvents.$inferSelect;
 
-export interface StatusPatch { filterReason?: string | null; lowPay?: boolean; scoreAttempts?: number; draftAttempts?: number }
+export interface StatusPatch { filterReason?: string | null; lowPay?: boolean; scoreAttempts?: number; draftAttempts?: number; draftFailureNotifiedAt?: Date | null }
 export interface UsageInput {
   jobId: number | null; stage: string; provider: string; model: string;
   inputTokens: number; outputTokens: number; costUsd: number;
@@ -181,4 +181,19 @@ export function resetStaleDrafting(db: Db, olderThan: Date, now = new Date()): n
     .where(and(eq(jobs.status, 'drafting'), lt(jobs.updatedAt, olderThan))).all();
   for (const s of stale) setStatus(db, s.id, 'shortlisted', 'stale drafting reset', {}, now);
   return stale.length;
+}
+
+/** draft_failed jobs whose failure has not been sent to Telegram yet, with the note of the transition into draft_failed. */
+export function listUnnotifiedDraftFailures(db: Db, limit: number): { job: JobRow; reason: string }[] {
+  const rows = db.select().from(jobs).where(and(eq(jobs.status, 'draft_failed'), isNull(jobs.draftFailureNotifiedAt)))
+    .orderBy(asc(jobs.updatedAt), asc(jobs.id)).limit(limit).all();
+  return rows.map((job) => {
+    const ev = db.select({ note: jobEvents.note }).from(jobEvents)
+      .where(and(eq(jobEvents.jobId, job.id), eq(jobEvents.toStatus, 'draft_failed'))).orderBy(desc(jobEvents.id)).limit(1).get();
+    return { job, reason: ev?.note ?? 'unknown error' };
+  });
+}
+
+export function markDraftFailureNotified(db: Db, jobId: number, now = new Date()): void {
+  db.update(jobs).set({ draftFailureNotifiedAt: now }).where(eq(jobs.id, jobId)).run();
 }

@@ -13,7 +13,7 @@ const done = (jobId: number) => revalidatePath(`/jobs/${jobId}`);
 
 export async function shortlistJob(jobId: number) { const { db } = guard(jobId, ['awaiting_review']); setStatus(db, jobId, 'shortlisted', 'dashboard'); done(jobId); }
 export async function skipJob(jobId: number) { const { db } = guard(jobId, ['awaiting_review', 'draft_ready']); setStatus(db, jobId, 'skipped', 'dashboard'); done(jobId); }
-export async function regenerateDraft(jobId: number) { const { db } = guard(jobId, ['draft_ready', 'draft_failed']); setStatus(db, jobId, 'shortlisted', 'dashboard regenerate', { draftAttempts: 0 }); done(jobId); }
+export async function regenerateDraft(jobId: number) { const { db } = guard(jobId, ['draft_ready', 'draft_failed']); setStatus(db, jobId, 'shortlisted', 'dashboard regenerate', { draftAttempts: 0, draftFailureNotifiedAt: null }); done(jobId); }
 export async function markApplied(jobId: number) { const { db } = guard(jobId, ['ready_to_apply']); setStatus(db, jobId, 'applied', 'dashboard'); done(jobId); }
 
 export async function saveDraft(formData: FormData) {

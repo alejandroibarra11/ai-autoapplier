@@ -97,8 +97,9 @@ describe('runDrafting', () => {
     const bad = () => new Fake([new LLMParseError('bad')]);
     await runDrafting(deps(db, bad()));
     expect(getJob(db, jobs[0]!.id)).toMatchObject({ status: 'shortlisted', draftAttempts: 1 });
-    await runDrafting(deps(db, bad()));
-    expect(getJob(db, jobs[0]!.id)).toMatchObject({ status: 'draft_failed', draftAttempts: 2 });
+    const r = await runDrafting(deps(db, bad()));
+    expect(getJob(db, jobs[0]!.id)).toMatchObject({ status: 'draft_failed', draftAttempts: 2, draftFailureNotifiedAt: null });
+    expect(r).toMatchObject({ failed: 1, drafted: 0, lastError: 'bad' });
   });
 
   it('API errors do not count attempts and stop after 3 in a row', async () => {

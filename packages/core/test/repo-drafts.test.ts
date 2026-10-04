@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { makeJob, testDb } from './helpers';
 import {
   insertJobs, listJobsByStatus, setStatus, getJob, insertDraft, latestDraft, updateDraftContent,
-  markDraftNotified, listUnnotifiedDrafts, listJobsForDrafting, setResolved, recordUsage, spendSince,
+  markDraftNotified, listUnnotifiedDrafts, listUnnotifiedDraftFailures, markDraftFailureNotified, listJobsForDrafting, setResolved, recordUsage, spendSince,
   type DraftInput,
 } from '../src/db/repo';
 
@@ -77,5 +77,29 @@ describe('drafts repo', () => {
     const since = new Date('2026-10-04T00:00:00Z');
     expect(spendSince(db, since)).toBeCloseTo(1.5);
     expect(spendSince(db, since, 'draft')).toBeCloseTo(0.5);
+  });
+});
+
+describe('draft failure notices', () => {
+  it('lists draft_failed jobs once with the failure reason until marked', () => {
+    const { db, jobs } = seed(2);
+    const [a, b] = [jobs[0]!.id, jobs[1]!.id];
+    setStatus(db, a, 'shortlisted');
+    setStatus(db, a, 'draft_failed', 'bad json from model');
+    setStatus(db, b, 'shortlisted');
+    expect(listUnnotifiedDraftFailures(db, 10).map((f) => [f.job.id, f.reason])).toEqual([[a, 'bad json from model']]);
+    markDraftFailureNotified(db, a, new Date('2026-10-04T00:00:00Z'));
+    expect(getJob(db, a)!.draftFailureNotifiedAt).toEqual(new Date('2026-10-04T00:00:00Z'));
+    expect(listUnnotifiedDraftFailures(db, 10)).toEqual([]);
+  });
+  it('resets the marker when the status patch clears it (regenerate)', () => {
+    const { db, jobs } = seed();
+    const id = jobs[0]!.id;
+    setStatus(db, id, 'draft_failed', 'x');
+    markDraftFailureNotified(db, id);
+    setStatus(db, id, 'shortlisted', 'dashboard regenerate', { draftAttempts: 0, draftFailureNotifiedAt: null });
+    expect(getJob(db, id)!.draftFailureNotifiedAt).toBeNull();
+    setStatus(db, id, 'draft_failed', 'again');
+    expect(listUnnotifiedDraftFailures(db, 10).map((f) => f.reason)).toEqual(['again']);
   });
 });

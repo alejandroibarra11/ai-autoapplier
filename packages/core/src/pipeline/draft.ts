@@ -18,7 +18,7 @@ export interface DraftStageDeps {
   renderPdf: (html: string, outPath: string) => Promise<void>;
   now?: Date; limit?: number; onlyJobId?: number; stepTimeoutMs?: number; save?: typeof insertDraft;
 }
-export interface DraftRunResult { drafted: number; failed: number; capped: boolean }
+export interface DraftRunResult { drafted: number; failed: number; capped: boolean; lastError?: string }
 
 const MAX_CONSECUTIVE_API_ERRORS = 3;
 const STALE_DRAFTING_MS = 15 * 60_000;
@@ -80,11 +80,14 @@ export async function runDrafting(d: DraftStageDeps): Promise<DraftRunResult> {
     } catch (e) {
       const msg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
       res.failed++;
+      res.lastError = msg;
       try {
         if (e instanceof LLMParseError) {
           apiErrors = 0;
           const attempts = job.draftAttempts + 1;
-          setStatus(db, job.id, attempts >= cfg.drafting.maxAttempts ? 'draft_failed' : 'shortlisted', msg, { draftAttempts: attempts }, now);
+          const failed = attempts >= cfg.drafting.maxAttempts;
+          // Entering draft_failed re-arms the one-time Telegram failure notice.
+          setStatus(db, job.id, failed ? 'draft_failed' : 'shortlisted', msg, { draftAttempts: attempts, ...(failed ? { draftFailureNotifiedAt: null } : {}) }, now);
         } else {
           apiErrors++;
           setStatus(db, job.id, 'shortlisted', msg, {}, now);

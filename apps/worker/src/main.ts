@@ -6,8 +6,8 @@ import {
   resolveApplyTarget, runDrafting, type BrowserSession,
 } from '@autoapplier/core';
 import { createBrowserHolder, createLogThrottle } from './browser-holder';
-import { createDraftLoop } from './draft-loop';
-import { notifyDrafts, sendReady, type DraftSender } from './drafts';
+import { createDraftLoop, createFailureWatch } from './draft-loop';
+import { notifyDraftFailures, notifyDrafts, sendReady, type DraftSender } from './drafts';
 import { bootstrap } from './bootstrap';
 import { createDailyGate, logSummary, runPipelineOnce } from './pipeline';
 import { createBot, type MessageSender } from './telegram';
@@ -52,6 +52,7 @@ const draftProvider = createProvider(app.cfg.drafting.provider);
 const draftCapGate = createDailyGate();
 const holder = createBrowserHolder(() => openBrowser({ headless: app.cfg.browser.headless, userDataDir: join(app.root, 'data/browser') }));
 const throttleLaunchLog = createLogThrottle(60 * 60_000);
+const failureWatch = createFailureWatch();
 const draftLoop = createDraftLoop({
   run: async () => {
     // Only launch the browser when there is something to draft.
@@ -68,11 +69,15 @@ const draftLoop = createDraftLoop({
       renderPdf: async (html, out) => { if (!session) throw new Error('no browser'); await renderPdfWith(session, html, out); },
     });
     if (r.drafted || r.failed || r.capped) console.log(`[draft] drafted=${r.drafted} failed=${r.failed} capped=${r.capped}`);
+    const keepsFailing = failureWatch(r, new Date());
+    if (keepsFailing) console.error(`[draft] ${keepsFailing}`);
     if (telegramUp && chatId) {
+      if (keepsFailing) await draftSender.sendMessage(chatId, keepsFailing).catch((e) => console.error('[draft] failing-loop warning failed', e));
       if (r.capped && draftCapGate(new Date())) {
         await draftSender.sendMessage(chatId, `⚠️ Daily drafting spend cap ($${app.cfg.drafting.dailySpendCapUsd}) reached; drafts paused until tomorrow (UTC).`).catch((e) => console.error('[draft] cap warning failed', e));
       }
       await notifyDrafts(draftSender, chatId, app.db);
+      await notifyDraftFailures(draftSender, chatId, app.db);
     }
   },
 });

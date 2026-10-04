@@ -40,6 +40,7 @@ export const jobs = sqliteTable('jobs', {
   resolvedApplyUrl: text('resolved_apply_url'),
   resolvedKind: text('resolved_kind').$type<ResolvedKind>(),
   draftAttempts: integer('draft_attempts').notNull().default(0),
+  draftFailureNotifiedAt: integer('draft_failure_notified_at', { mode: 'timestamp' }),
 }, (t) => [
   uniqueIndex('jobs_source_job').on(t.source, t.sourceJobId),
   index('jobs_dedupe_key').on(t.dedupeKey),

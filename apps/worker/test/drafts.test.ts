@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, insertJobs, listJobsByStatus, setStatus, insertDraft, getJob, latestDraft, type DraftInput } from '@autoapplier/core';
-import { formatDraftCard, formatReadyMessages, handleDraftAction, notifyDrafts, parseDraftCallback, sendReady } from '../src/drafts';
+import { formatDraftCard, formatDraftFailure, formatReadyMessages, handleDraftAction, notifyDraftFailures, notifyDrafts, parseDraftCallback, sendReady } from '../src/drafts';
 
 function setup(flags: string[] = [], coverLetter = 'I build <LLM> tools & agents.') {
   const db = openDb(':memory:');
@@ -182,3 +182,34 @@ describe('card bounds', () => {
     expect(card).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
   });
 });
+
+describe('draft failure notices', () => {
+  it('formats an escaped failure message with the dashboard path', () => {
+    const { db, id } = setup();
+    expect(formatDraftFailure(getJob(db, id)!, 'model said <nope> & quit')).toBe(
+      `⚠️ Draft failed for Voice &lt;AI&gt; Engineer — Vapi &amp; Co: model said &lt;nope&gt; &amp; quit. Retry from the dashboard (/jobs/${id}).`);
+  });
+  it('truncates long reasons', () => {
+    const { db, id } = setup();
+    expect(formatDraftFailure(getJob(db, id)!, 'x'.repeat(1000)).length).toBeLessThan(400);
+  });
+  it('sends one notice per failed job and marks it', async () => {
+    const { db, id } = setup();
+    setStatus(db, id, 'draft_failed', 'parse error');
+    const sent: string[] = [];
+    const sender = { sendMessage: async (_c: string, t: string) => { sent.push(t); }, sendDocument: async () => {} };
+    expect(await notifyDraftFailures(sender, 'c', db)).toBe(1);
+    expect(await notifyDraftFailures(sender, 'c', db)).toBe(0);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain('parse error');
+    expect(getJob(db, id)!.draftFailureNotifiedAt).toBeInstanceOf(Date);
+  });
+  it('keeps the notice pending when sending fails', async () => {
+    const { db, id } = setup();
+    setStatus(db, id, 'draft_failed', 'parse error');
+    const sender = { sendMessage: async () => { throw new Error('down'); }, sendDocument: async () => {} };
+    expect(await notifyDraftFailures(sender, 'c', db)).toBe(0);
+    expect(getJob(db, id)!.draftFailureNotifiedAt).toBeNull();
+  });
+});
+
