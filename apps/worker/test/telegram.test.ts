@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { GrammyError } from 'grammy';
 import { openDb, insertJobs, listJobsByStatus, setStatus, insertScore, getJob, listUnnotified, type ScorePayload } from '@autoapplier/core';
 import { escapeHtml, formatJobCard, handleDecision, notifyPending, parseCallback } from '../src/telegram';
 
@@ -64,22 +65,77 @@ describe('handleDecision', () => {
 });
 
 describe('notifyPending', () => {
+  const noDelay = { delay: async () => {} };
+
   it('sends best-first, marks notified, never re-sends', async () => {
     const { db } = setup(3);
     const sent: string[] = [];
     const sender = { sendMessage: async (_c: string, text: string) => { sent.push(text); } };
-    expect(await notifyPending(sender, '42', db, 2)).toBe(2);
+    expect(await notifyPending(sender, '42', db, 2, new Date(), noDelay)).toBe(2);
     expect(sent[0]).toContain('Fit 72');
     expect(sent[1]).toContain('Fit 71');
     expect(listUnnotified(db, 10)).toHaveLength(1);
-    expect(await notifyPending(sender, '42', db, 10)).toBe(1);
-    expect(await notifyPending(sender, '42', db, 10)).toBe(0);
+    expect(await notifyPending(sender, '42', db, 10, new Date(), noDelay)).toBe(1);
+    expect(await notifyPending(sender, '42', db, 10, new Date(), noDelay)).toBe(0);
   });
 
-  it('leaves a job unnotified if sending fails', async () => {
+  it('pauses ~1s between cards', async () => {
+    const { db } = setup(3);
+    const delay = vi.fn(async (_ms: number) => {});
+    await notifyPending({ sendMessage: async () => {} }, '42', db, 10, new Date(), { delay });
+    expect(delay.mock.calls).toEqual([[1000], [1000]]);
+  });
+
+  it('a non-429 failure is logged and marked notified; later cards are still sent', async () => {
+    const { db } = setup(3);
+    const sent: string[] = [];
+    let call = 0;
+    const sender = { sendMessage: async (_c: string, text: string) => {
+      call += 1;
+      if (call === 2) throw new Error('network');
+      sent.push(text);
+    } };
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await notifyPending(sender, '42', db, 10, new Date(), noDelay)).toBe(2);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toContain('Fit 70'); // third card still sent
+    expect(listUnnotified(db, 10)).toHaveLength(0); // failed one marked notified so the queue moves
+    expect(listJobsByStatus(db, ['awaiting_review'])).toHaveLength(3); // still visible in the dashboard
+    expect(err).toHaveBeenCalled();
+    err.mockRestore();
+  });
+
+  it('marks a job notified when sending fails with a non-retryable error (no throw)', async () => {
     const { db } = setup(1);
     const sender = { sendMessage: async () => { throw new Error('network'); } };
-    await expect(notifyPending(sender, '42', db)).rejects.toThrow('network');
-    expect(listUnnotified(db, 10)).toHaveLength(1);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await notifyPending(sender, '42', db, 20, new Date(), noDelay)).toBe(0);
+    expect(listUnnotified(db, 10)).toHaveLength(0);
+    err.mockRestore();
+  });
+
+  const tooMany = (retryAfter: number) => new GrammyError('Too Many Requests',
+    { ok: false, error_code: 429, description: 'Too Many Requests: retry after ' + retryAfter, parameters: { retry_after: retryAfter } }, 'sendMessage', {});
+
+  it('on 429 waits retry_after seconds once and retries the card', async () => {
+    const { db } = setup(1);
+    let call = 0;
+    const sender = { sendMessage: async () => { call += 1; if (call === 1) throw tooMany(3); } };
+    const delay = vi.fn(async (_ms: number) => {});
+    expect(await notifyPending(sender, '42', db, 20, new Date(), { delay })).toBe(1);
+    expect(call).toBe(2);
+    expect(delay).toHaveBeenCalledWith(3000);
+    expect(listUnnotified(db, 10)).toHaveLength(0);
+  });
+
+  it('a second 429 leaves the card unnotified and stops this run', async () => {
+    const { db } = setup(2);
+    let call = 0;
+    const sender = { sendMessage: async () => { call += 1; throw tooMany(1); } };
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await notifyPending(sender, '42', db, 20, new Date(), noDelay)).toBe(0);
+    expect(call).toBe(2);
+    expect(listUnnotified(db, 10)).toHaveLength(2);
+    err.mockRestore();
   });
 });

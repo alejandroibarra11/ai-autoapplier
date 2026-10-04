@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard } from 'grammy';
+import { Bot, GrammyError, InlineKeyboard } from 'grammy';
 import {
   formatComp, getJob, latestScore, listUnnotified, markNotified, setStatus,
   type Db, type JobRow, type ScorePayload,
@@ -51,21 +51,56 @@ export interface MessageSender {
   sendMessage(chatId: string, text: string, other?: Record<string, unknown>): Promise<unknown>;
 }
 
-export async function notifyPending(sender: MessageSender, chatId: string, db: Db, limit = 20, now = new Date()): Promise<number> {
+export interface NotifyOptions { delay?: (ms: number) => Promise<void> }
+
+const CARD_PAUSE_MS = 1000;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const retryAfterSeconds = (e: unknown): number | null =>
+  e instanceof GrammyError && e.error_code === 429 ? e.parameters.retry_after ?? 1 : null;
+
+/**
+ * Sends one card per unnotified awaiting_review job, best fit first. Returns the number sent.
+ * A 429 is retried once after retry_after; a second 429 leaves the card for the next run and stops.
+ * Any other error is logged and the job is marked notified so one bad card cannot block the queue
+ * (the job stays awaiting_review and visible in the dashboard).
+ */
+export async function notifyPending(
+  sender: MessageSender, chatId: string, db: Db, limit = 20, now = new Date(), opts: NotifyOptions = {},
+): Promise<number> {
+  const delay = opts.delay ?? sleep;
   const rows = listUnnotified(db, 500)
     .map((job) => ({ job, score: latestScore(db, job.id) }))
     .filter((r): r is { job: JobRow; score: ScorePayload } => r.score !== undefined)
     .sort((a, b) => b.score.fitScore - a.score.fitScore)
     .slice(0, limit);
-  for (const { job, score } of rows) {
-    await sender.sendMessage(chatId, formatJobCard(job, score), {
+  let sent = 0;
+  for (const [i, { job, score }] of rows.entries()) {
+    if (i > 0) await delay(CARD_PAUSE_MS);
+    const send = () => sender.sendMessage(chatId, formatJobCard(job, score), {
       parse_mode: 'HTML',
       reply_markup: jobKeyboard(job.id, job.applyUrl),
       link_preview_options: { is_disabled: true },
     });
+    try {
+      try {
+        await send();
+      } catch (e) {
+        const wait = retryAfterSeconds(e);
+        if (wait === null) throw e;
+        await delay(wait * 1000);
+        await send();
+      }
+      sent += 1;
+    } catch (e) {
+      if (retryAfterSeconds(e) !== null) {
+        console.error(`[telegram] still rate limited on job #${job.id}; leaving the rest for the next run`);
+        break;
+      }
+      console.error(`[telegram] failed to send job #${job.id}; marking notified (still awaiting_review in dashboard):`, e instanceof Error ? e.message : e);
+    }
     markNotified(db, job.id, now);
   }
-  return rows.length;
+  return sent;
 }
 
 export function createBot(token: string, chatId: string, db: Db): Bot {
