@@ -34,3 +34,5 @@ export * from './llm/factory';
 export * from './score/prompt';
 export * from './score/score';
 export * from './pipeline/score';
+
+export * from './eval/metrics';
