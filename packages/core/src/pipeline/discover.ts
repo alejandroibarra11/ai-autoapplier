@@ -4,19 +4,21 @@ import type { Source } from '../sources/types';
 import { HttpError } from '../http';
 import { deactivateCompany, insertJobs, markPolled, upsertCompany } from '../db/repo';
 
-export interface DiscoverResult { fetched: number; inserted: number; errors: { source: string; message: string }[] }
+export interface DiscoverResult { fetched: number; inserted: number; skipped: number; errors: { source: string; message: string }[] }
 
 export function seedCompanies(db: Db, cfg: Config): void {
   for (const c of cfg.seedCompanies) upsertCompany(db, { ...c, source: 'seed' });
 }
 
 export async function runDiscover(db: Db, sources: Source[], now = new Date()): Promise<DiscoverResult> {
-  const r: DiscoverResult = { fetched: 0, inserted: 0, errors: [] };
+  const r: DiscoverResult = { fetched: 0, inserted: 0, skipped: 0, errors: [] };
   for (const src of sources) {
     try {
       const list = await src.fetchJobs();
       r.fetched += list.length;
-      r.inserted += insertJobs(db, list, now);
+      const ins = insertJobs(db, list, now);
+      r.inserted += ins.inserted;
+      r.skipped += ins.skipped;
       if (src.companyId !== undefined) markPolled(db, src.companyId, now);
       for (const j of list) {
         if (j.ats && j.atsToken && j.source !== j.ats) {

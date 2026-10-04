@@ -16,10 +16,17 @@ describe('repo', () => {
   it('dedupes on company+title across polls and sources', () => {
     const db = testDb();
     const a = makeJob({ company: 'Acme', title: 'AI Engineer' });
-    expect(insertJobs(db, [a])).toBe(1);
-    expect(insertJobs(db, [a])).toBe(0);
-    expect(insertJobs(db, [{ ...a, source: 'remoteok', sourceJobId: 'x', company: 'ACME' }])).toBe(0);
+    expect(insertJobs(db, [a])).toEqual({ inserted: 1, skipped: 0 });
+    expect(insertJobs(db, [a])).toEqual({ inserted: 0, skipped: 0 });
+    expect(insertJobs(db, [{ ...a, source: 'remoteok', sourceJobId: 'x', company: 'ACME' }])).toEqual({ inserted: 0, skipped: 0 });
     expect(listJobsByStatus(db, ['discovered'])).toHaveLength(1);
+  });
+
+  it('skips rows with an invalid postedAt without dropping the rest of the batch', () => {
+    const db = testDb();
+    const r = insertJobs(db, [makeJob(), makeJob({ postedAt: new Date('nope') }), makeJob()]);
+    expect(r).toEqual({ inserted: 2, skipped: 1 });
+    expect(listJobsByStatus(db, ['discovered'])).toHaveLength(2);
   });
 
   it('setStatus updates row and writes an event', () => {

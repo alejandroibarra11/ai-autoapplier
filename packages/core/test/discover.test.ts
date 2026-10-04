@@ -17,8 +17,15 @@ describe('runDiscover', () => {
     const bad: Source = { name: 'bad', fetchJobs: async () => { throw new Error('boom'); } };
     const good: Source = { name: 'good', fetchJobs: async () => [makeJob({ title: 'AI Engineer A' })] };
     const r = await runDiscover(db, [bad, good]);
-    expect(r).toMatchObject({ fetched: 1, inserted: 1, errors: [{ source: 'bad', message: 'boom' }] });
+    expect(r).toMatchObject({ fetched: 1, inserted: 1, skipped: 0, errors: [{ source: 'bad', message: 'boom' }] });
     expect(listJobsByStatus(db, ['discovered'])).toHaveLength(1);
+  });
+
+  it('counts rows skipped for an invalid postedAt and still inserts the good ones', async () => {
+    const db = testDb();
+    const src: Source = { name: 'mixed', fetchJobs: async () => [makeJob(), makeJob({ postedAt: new Date(NaN) }), makeJob()] };
+    const r = await runDiscover(db, [src]);
+    expect(r).toMatchObject({ fetched: 3, inserted: 2, skipped: 1, errors: [] });
   });
 
   it('deactivates a company whose board returns 404', async () => {

@@ -15,17 +15,22 @@ export interface UsageInput {
   inputTokens: number; outputTokens: number; costUsd: number;
 }
 
-export function insertJobs(db: Db, list: NormalizedJob[], now = new Date()): number {
+export interface InsertResult { inserted: number; skipped: number }
+
+/** Inserts new jobs. Rows with an invalid postedAt are skipped (counted) instead of failing the whole batch. */
+export function insertJobs(db: Db, list: NormalizedJob[], now = new Date()): InsertResult {
   return db.transaction((tx) => {
     let n = 0;
+    let skipped = 0;
     for (const j of list) {
+      if (!(j.postedAt instanceof Date) || !Number.isFinite(j.postedAt.getTime())) { skipped += 1; continue; }
       const r = tx.insert(jobs)
         .values({ ...j, dedupeKey: dedupeKey(j.company, j.title), fetchedAt: now, updatedAt: now })
         .onConflictDoNothing({ target: jobs.dedupeKey })
         .run();
       n += r.changes;
     }
-    return n;
+    return { inserted: n, skipped };
   });
 }
 

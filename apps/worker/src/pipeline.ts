@@ -30,7 +30,7 @@ export async function runPipelineOnce(ctx: PipelineCtx): Promise<PipelineSummary
 }
 
 export function logSummary(s: PipelineSummary): void {
-  console.log(`[pipeline] sources fetched=${s.discover.fetched} new=${s.discover.inserted} errors=${s.discover.errors.length}`);
+  console.log(`[pipeline] sources fetched=${s.discover.fetched} new=${s.discover.inserted} skipped=${s.discover.skipped} errors=${s.discover.errors.length}`);
   for (const e of s.discover.errors) console.log(`  ! ${e.source}: ${e.message}`);
   console.log(`[pipeline] rules passed=${s.filter.passed} rejected=${s.filter.rejected}`);
   console.log(`[pipeline] scored=${s.score.scored} failed=${s.score.failed} capped=${s.score.capped} notified=${s.notified}`);
