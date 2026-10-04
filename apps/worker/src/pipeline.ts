@@ -4,7 +4,24 @@ import {
 } from '@autoapplier/core';
 import { notifyPending, type MessageSender } from './telegram';
 
-export interface PipelineCtx { db: Db; cfg: Config; provider: LLMProvider; profileText: string; sender?: MessageSender; chatId?: string }
+/** Returns true the first time it is called on each UTC day (in-memory). */
+export type DailyGate = (now: Date) => boolean;
+export function createDailyGate(): DailyGate {
+  let lastDay: string | null = null;
+  return (now) => {
+    const day = now.toISOString().slice(0, 10);
+    if (day === lastDay) return false;
+    lastDay = day;
+    return true;
+  };
+}
+const spendCapWarningGate = createDailyGate();
+
+export interface PipelineCtx {
+  db: Db; cfg: Config; provider: LLMProvider; profileText: string; sender?: MessageSender; chatId?: string;
+  /** Spend-cap warning limiter; defaults to a process-wide once-per-UTC-day gate. */
+  capWarningGate?: DailyGate;
+}
 export interface PipelineSummary {
   discover: DiscoverResult; filter: { passed: number; rejected: number }; score: ScoreRunResult; notified: number;
 }
@@ -17,7 +34,7 @@ export async function runPipelineOnce(ctx: PipelineCtx): Promise<PipelineSummary
   const score = await runScore({ db, cfg, provider: ctx.provider, profileText: ctx.profileText });
   let notified = 0;
   if (ctx.sender && ctx.chatId) {
-    if (score.capped) {
+    if (score.capped && (ctx.capWarningGate ?? spendCapWarningGate)(new Date())) {
       try {
         await ctx.sender.sendMessage(ctx.chatId, `⚠️ Daily LLM spend cap ($${cfg.scoring.dailySpendCapUsd}) reached; scoring paused until tomorrow (UTC).`);
       } catch (e) {
