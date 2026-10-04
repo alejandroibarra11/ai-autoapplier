@@ -27,8 +27,9 @@ export function normalizeKey(s: string): string {
     .replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
-export function dedupeKey(company: string, title: string): string {
-  return `${normalizeKey(company)}|${normalizeKey(title)}`;
+/** Soft cross-source dedupe key. The hard identity of a job is (source, sourceJobId). */
+export function dedupeKey(company: string, title: string, locationText: string): string {
+  return `${normalizeKey(company)}|${normalizeKey(title)}|${normalizeKey(locationText)}`;
 }
 
 export function normalizeForMatch(s: string): string {

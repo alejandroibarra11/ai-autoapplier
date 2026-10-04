@@ -13,13 +13,35 @@ const score: ScorePayload = {
 };
 
 describe('repo', () => {
-  it('dedupes on company+title across polls and sources', () => {
+  it('same job re-polled from the same source is stored once (source + sourceJobId)', () => {
     const db = testDb();
     const a = makeJob({ company: 'Acme', title: 'AI Engineer' });
     expect(insertJobs(db, [a])).toEqual({ inserted: 1, skipped: 0 });
     expect(insertJobs(db, [a])).toEqual({ inserted: 0, skipped: 0 });
-    expect(insertJobs(db, [{ ...a, source: 'remoteok', sourceJobId: 'x', company: 'ACME' }])).toEqual({ inserted: 0, skipped: 0 });
+    expect(insertJobs(db, [{ ...a, title: 'AI Engineer (edited)' }])).toEqual({ inserted: 0, skipped: 0 });
     expect(listJobsByStatus(db, ['discovered'])).toHaveLength(1);
+  });
+
+  it('same company + title + location from another source is stored once', () => {
+    const db = testDb();
+    const a = makeJob({ company: 'Acme', title: 'AI Engineer', locationText: 'Remote - LATAM' });
+    insertJobs(db, [a]);
+    expect(insertJobs(db, [{ ...a, source: 'remoteok', sourceJobId: 'x', company: 'ACME', locationText: 'remote latam' }]))
+      .toEqual({ inserted: 0, skipped: 0 });
+    expect(listJobsByStatus(db, ['discovered'])).toHaveLength(1);
+  });
+
+  it('keeps region variants: same company + title, different location', () => {
+    const db = testDb();
+    const a = makeJob({ company: 'Acme', title: 'AI Engineer', locationText: 'Remote - LATAM' });
+    expect(insertJobs(db, [a, { ...a, sourceJobId: 'b', locationText: 'Remote - Europe' }])).toEqual({ inserted: 2, skipped: 0 });
+    expect(insertJobs(db, [{ ...a, source: 'remoteok', sourceJobId: 'c', locationText: 'Remote - US' }])).toEqual({ inserted: 1, skipped: 0 });
+    expect(listJobsByStatus(db, ['discovered'])).toHaveLength(3);
+  });
+
+  it('the same sourceJobId from different sources are different jobs', () => {
+    const db = testDb();
+    expect(insertJobs(db, [makeJob({ sourceJobId: '1' }), makeJob({ source: 'lever', sourceJobId: '1' })])).toEqual({ inserted: 2, skipped: 0 });
   });
 
   it('skips rows with an invalid postedAt without dropping the rest of the batch', () => {

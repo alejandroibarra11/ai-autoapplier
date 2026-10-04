@@ -36,7 +36,11 @@ export const jobs = sqliteTable('jobs', {
   lowPay: integer('low_pay', { mode: 'boolean' }).notNull().default(false),
   scoreAttempts: integer('score_attempts').notNull().default(0),
   notifiedAt: integer('notified_at', { mode: 'timestamp' }),
-}, (t) => [uniqueIndex('jobs_dedupe_key').on(t.dedupeKey), index('jobs_status').on(t.status)]);
+}, (t) => [
+  uniqueIndex('jobs_source_job').on(t.source, t.sourceJobId),
+  index('jobs_dedupe_key').on(t.dedupeKey),
+  index('jobs_status').on(t.status),
+]);
 
 export const scores = sqliteTable('scores', {
   id: integer('id').primaryKey({ autoIncrement: true }),

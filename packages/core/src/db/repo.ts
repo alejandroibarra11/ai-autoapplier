@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import type { Db } from './client';
 import { companies, jobEvents, jobs, llmUsage, scores } from './schema';
 import type { Ats, JobStatus, NormalizedJob } from '../types';
@@ -17,16 +17,24 @@ export interface UsageInput {
 
 export interface InsertResult { inserted: number; skipped: number }
 
-/** Inserts new jobs. Rows with an invalid postedAt are skipped (counted) instead of failing the whole batch. */
+/**
+ * Inserts new jobs. Identity is (source, sourceJobId); a row is also dropped when the same
+ * company|title|location already came from a different source. Rows with an invalid postedAt
+ * are skipped (counted) instead of failing the whole batch.
+ */
 export function insertJobs(db: Db, list: NormalizedJob[], now = new Date()): InsertResult {
   return db.transaction((tx) => {
     let n = 0;
     let skipped = 0;
     for (const j of list) {
       if (!(j.postedAt instanceof Date) || !Number.isFinite(j.postedAt.getTime())) { skipped += 1; continue; }
+      const key = dedupeKey(j.company, j.title, j.locationText);
+      const crossSource = tx.select({ id: jobs.id }).from(jobs)
+        .where(and(eq(jobs.dedupeKey, key), ne(jobs.source, j.source))).limit(1).get();
+      if (crossSource) continue;
       const r = tx.insert(jobs)
-        .values({ ...j, dedupeKey: dedupeKey(j.company, j.title), fetchedAt: now, updatedAt: now })
-        .onConflictDoNothing({ target: jobs.dedupeKey })
+        .values({ ...j, dedupeKey: key, fetchedAt: now, updatedAt: now })
+        .onConflictDoNothing({ target: [jobs.source, jobs.sourceJobId] })
         .run();
       n += r.changes;
     }

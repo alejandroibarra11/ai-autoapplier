@@ -17,8 +17,8 @@ describe('htmlToText', () => {
 });
 
 describe('keys', () => {
-  it('normalizes company + title for dedupe', () => {
-    expect(dedupeKey('Acme, Inc.', 'Senior AI Engineer (Remote)')).toBe('acme inc|senior ai engineer remote');
+  it('normalizes company + title + location for dedupe', () => {
+    expect(dedupeKey('Acme, Inc.', 'Senior AI Engineer (Remote)', 'Remote - LATAM')).toBe('acme inc|senior ai engineer remote|remote latam');
   });
   it('strips accents', () => expect(normalizeKey('México Ñandú')).toBe('mexico nandu'));
   it('normalizeForMatch collapses whitespace and lowercases', () => {
