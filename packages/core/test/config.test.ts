@@ -16,6 +16,11 @@ describe('config', () => {
       .replace('rejectPatterns:\n', 'rejectPatterns:\n    - "([unclosed"\n');
     expect(() => parseConfig(text)).toThrow(/invalid regex/i);
   });
+  it('rejects pollIntervalHours outside 1..23', () => {
+    const text = readFileSync(join(findRoot(), 'config.yaml'), 'utf8');
+    expect(() => parseConfig(text.replace(/pollIntervalHours:\s*\d+/, 'pollIntervalHours: 24'))).toThrow();
+    expect(() => parseConfig(text.replace(/pollIntervalHours:\s*\d+/, 'pollIntervalHours: 0'))).toThrow();
+  });
   it('rejects missing sections', () => {
     expect(() => parseConfig('pollIntervalHours: 3')).toThrow();
   });

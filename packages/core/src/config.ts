@@ -9,7 +9,7 @@ const SeedCompany = z.object({
 });
 
 export const ConfigSchema = z.object({
-  pollIntervalHours: z.number().int().positive(),
+  pollIntervalHours: z.number().int().min(1).max(23),
   maxAgeDays: z.number().positive(),
   roles: z.object({ titleInclude: z.array(z.string()).min(1), titleExclude: z.array(z.string()) }),
   eligibility: z.object({

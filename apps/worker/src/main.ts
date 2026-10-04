@@ -27,7 +27,10 @@ async function tick() {
 
 if (!chatId) console.warn('TELEGRAM_CHAT_ID missing: send /start to the bot to get it; notifications disabled until set.');
 cron.schedule(`0 */${app.cfg.pollIntervalHours} * * *`, tick);
-void bot.start({ onStart: (me) => console.log(`[telegram] @${me.username} polling`) });
+bot.start({ onStart: (me) => console.log(`[telegram] @${me.username} polling`) }).catch((e) => {
+  console.error('[telegram] failed to start — check TELEGRAM_BOT_TOKEN:', e instanceof Error ? e.message : e);
+  process.exit(1);
+});
 void tick();
 
 for (const sig of ['SIGINT', 'SIGTERM'] as const) process.once(sig, () => { void bot.stop(); process.exit(0); });

@@ -17,7 +17,13 @@ export async function runPipelineOnce(ctx: PipelineCtx): Promise<PipelineSummary
   const score = await runScore({ db, cfg, provider: ctx.provider, profileText: ctx.profileText });
   let notified = 0;
   if (ctx.sender && ctx.chatId) {
-    if (score.capped) await ctx.sender.sendMessage(ctx.chatId, `⚠️ Daily LLM spend cap ($${cfg.scoring.dailySpendCapUsd}) reached; scoring paused until tomorrow (UTC).`);
+    if (score.capped) {
+      try {
+        await ctx.sender.sendMessage(ctx.chatId, `⚠️ Daily LLM spend cap ($${cfg.scoring.dailySpendCapUsd}) reached; scoring paused until tomorrow (UTC).`);
+      } catch (e) {
+        console.error('[pipeline] failed to send spend-cap warning', e);
+      }
+    }
     notified = await notifyPending(ctx.sender, ctx.chatId, db);
   }
   return { discover, filter, score, notified };

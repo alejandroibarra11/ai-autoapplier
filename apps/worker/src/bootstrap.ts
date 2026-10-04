@@ -7,6 +7,8 @@ export function bootstrap() {
   const envPath = join(root, '.env');
   if (existsSync(envPath)) process.loadEnvFile(envPath);
   const cfg = loadConfig(join(root, 'config.yaml'));
+  if (cfg.scoring.provider === 'anthropic' && !process.env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY missing in .env (needed for scoring)');
+  if (cfg.scoring.provider === 'openai' && !process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY missing in .env (needed for scoring)');
   const profilePath = join(root, 'profile/profile.yaml');
   if (!existsSync(profilePath)) throw new Error(`missing ${profilePath} — copy profile/profile.example.yaml and fill it in`);
   const profileText = renderProfileForPrompt(loadProfile(profilePath));
