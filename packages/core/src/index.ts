@@ -16,3 +16,9 @@ export * from './score/schema';
 export * from './db/schema';
 export * from './db/client';
 export * from './db/repo';
+
+// Sources and pipeline
+export * from './http';
+export * from './sources';
+export * from './sources/ats-detect';
+export * from './pipeline/discover';
