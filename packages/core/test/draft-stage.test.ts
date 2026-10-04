@@ -45,13 +45,21 @@ const deps = (db: ReturnType<typeof testDb>, provider: LLMProvider, extra = {}) 
 });
 
 describe('runDrafting', () => {
-  it('drafts only onlyJobId when set', async () => {
-    const { db, jobs } = setup(2);
-    const target = jobs[1]!.id;
-    const r = await runDrafting(deps(db, new Fake([out]), { onlyJobId: target, limit: 50 }));
+  it('drafts exactly onlyJobId even when it is newest among many shortlisted jobs', async () => {
+    const { db, jobs } = setup(60);
+    const target = jobs[59]!.id;
+    setStatus(db, target, 'shortlisted', null, {}, new Date('2026-10-04T11:00:00Z'));
+    const r = await runDrafting(deps(db, new Fake([out]), { onlyJobId: target, limit: 1 }));
     expect(r.drafted).toBe(1);
     expect(getJob(db, target)!.status).toBe('draft_ready');
-    expect(getJob(db, jobs[0]!.id)!.status).toBe('shortlisted');
+    expect(listJobsByStatus(db, ['shortlisted'], 100)).toHaveLength(59);
+  });
+
+  it('onlyJobId ignores a job that is not shortlisted', async () => {
+    const { db, jobs } = setup(1);
+    setStatus(db, jobs[0]!.id, 'skipped');
+    const r = await runDrafting(deps(db, new Fake([out]), { onlyJobId: jobs[0]!.id }));
+    expect(r.drafted).toBe(0);
   });
 
   it('drafts shortlisted jobs into draft_ready with a stored draft and resolution', async () => {

@@ -26,6 +26,8 @@ Shortlisting a job in Telegram triggers a draft (cover letter, answers to the ap
 
 Flow: Shortlist -> draft card -> Approve -> ready message (links, CV, text) -> Mark applied. Drafts with blocking flags (unverified claim, missing answer, invalid option) cannot be approved from Telegram.
 
-Manual draft for one job (no Telegram):
+Upgrade note: after pulling phase 2 the service will not start until `profile/answers.yaml` exists (copy the example and fill it in).
+
+Manual draft for one job (no Telegram; uses its own browser profile `data/browser-cli`, so it can run while the service is up):
 
     pnpm --filter @autoapplier/worker cli draft <jobId>

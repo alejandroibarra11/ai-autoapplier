@@ -2,9 +2,10 @@ import { join } from 'node:path';
 import cron from 'node-cron';
 import { InputFile } from 'grammy';
 import {
-  createProvider, extractQuestions, getJob, latestDraft, makePageOpener, openBrowser, renderPdf as renderPdfWith,
+  createProvider, extractQuestions, getJob, latestDraft, listJobsForDrafting, makePageOpener, openBrowser, renderPdf as renderPdfWith,
   resolveApplyTarget, runDrafting, type BrowserSession,
 } from '@autoapplier/core';
+import { createBrowserHolder, createLogThrottle } from './browser-holder';
 import { createDraftLoop } from './draft-loop';
 import { notifyDrafts, sendReady, type DraftSender } from './drafts';
 import { bootstrap } from './bootstrap';
@@ -49,14 +50,15 @@ async function tick() {
 
 const draftProvider = createProvider(app.cfg.drafting.provider);
 const draftCapGate = createDailyGate();
-let browser: BrowserSession | null = null;
-async function getBrowser(): Promise<BrowserSession> {
-  browser ??= await openBrowser({ headless: app.cfg.browser.headless, userDataDir: join(app.root, 'data/browser') });
-  return browser;
-}
+const holder = createBrowserHolder(() => openBrowser({ headless: app.cfg.browser.headless, userDataDir: join(app.root, 'data/browser') }));
+const throttleLaunchLog = createLogThrottle(60 * 60_000);
 const draftLoop = createDraftLoop({
   run: async () => {
-    const session = await getBrowser().catch((e) => { console.error('[draft] browser unavailable:', e instanceof Error ? e.message : e); return null; });
+    // Only launch the browser when there is something to draft.
+    const pending = listJobsForDrafting(app.db, 1).length > 0;
+    const session = pending
+      ? await holder.get().catch((e) => { throttleLaunchLog(() => console.error('[draft] browser unavailable:', e instanceof Error ? e.message : e)); return null; })
+      : null;
     const opener = session ? makePageOpener(session, app.cfg.browser.timeoutMs) : null;
     const r = await runDrafting({
       db: app.db, cfg: app.cfg, provider: draftProvider, profile: app.profile, answers: app.answers,
@@ -89,4 +91,4 @@ void superviseBot({
   shouldStop: () => stopping,
 }).then((r) => { if (r === 'unauthorized') console.error('[telegram] fix TELEGRAM_BOT_TOKEN in .env and restart to re-enable notifications'); });
 
-for (const sig of ['SIGINT', 'SIGTERM'] as const) process.once(sig, () => { stopping = true; void bot.stop(); void (browser?.close() ?? Promise.resolve()).catch(() => {}).finally(() => process.exit(0)); });
+for (const sig of ['SIGINT', 'SIGTERM'] as const) process.once(sig, () => { stopping = true; void bot.stop(); void Promise.race([holder.peek()?.close().catch(() => {}), new Promise((r) => setTimeout(r, 5000))]).finally(() => process.exit(0)); });

@@ -5,7 +5,7 @@ import type { Profile } from '../profile';
 import type { Answers } from '../answers';
 import type { ApplyTarget, FormQuestion } from '../apply/types';
 import { COMMON_QUESTIONS } from '../apply/common';
-import { type JobRow, insertDraft, listJobsForDrafting, recordUsage, resetStaleDrafting, setResolved, setStatus, spendSince } from '../db/repo';
+import { type JobRow, insertDraft, getJob, listJobsForDrafting, recordUsage, resetStaleDrafting, setResolved, setStatus, spendSince } from '../db/repo';
 import { costUsd, LLMParseError, type LLMProvider } from '../llm/provider';
 import { draftJob } from '../draft/draft';
 import { renderCvHtml } from '../cv/render';
@@ -40,7 +40,10 @@ export async function runDrafting(d: DraftStageDeps): Promise<DraftRunResult> {
   const save = d.save ?? insertDraft;
   resetStaleDrafting(db, new Date(now.getTime() - STALE_DRAFTING_MS), now);
 
-  for (const job of listJobsForDrafting(db, d.limit ?? 5).filter((j) => d.onlyJobId === undefined || j.id === d.onlyJobId)) {
+  const queue = d.onlyJobId === undefined
+    ? listJobsForDrafting(db, d.limit ?? 5)
+    : [getJob(db, d.onlyJobId)].filter((j): j is JobRow => !!j && j.status === 'shortlisted');
+  for (const job of queue) {
     if (spendSince(db, dayStart, 'draft') >= cfg.drafting.dailySpendCapUsd) { res.capped = true; break; }
     setStatus(db, job.id, 'drafting', null, {}, now);
 

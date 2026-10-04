@@ -2,6 +2,10 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { findRoot, loadAnswers, loadConfig, loadProfile, openDb, renderProfileForPrompt, seedCompanies } from '@autoapplier/core';
 
+function load<T>(path: string, fn: (p: string) => T): T {
+  try { return fn(path); } catch (e) { throw new Error(`invalid ${path}: ${e instanceof Error ? e.message : String(e)}`); }
+}
+
 export function bootstrap() {
   const root = findRoot();
   const envPath = join(root, '.env');
@@ -13,11 +17,11 @@ export function bootstrap() {
   }
   const profilePath = join(root, 'profile/profile.yaml');
   if (!existsSync(profilePath)) throw new Error(`missing ${profilePath} — copy profile/profile.example.yaml and fill it in`);
-  const profile = loadProfile(profilePath);
+  const profile = load(profilePath, loadProfile);
   const profileText = renderProfileForPrompt(profile);
   const answersPath = join(root, 'profile/answers.yaml');
   if (!existsSync(answersPath)) throw new Error(`missing ${answersPath} — copy profile/answers.example.yaml and fill it in`);
-  const answers = loadAnswers(answersPath);
+  const answers = load(answersPath, loadAnswers);
   const db = openDb(join(root, process.env.DATABASE_PATH ?? 'data/app.db'));
   seedCompanies(db, cfg);
   return {
