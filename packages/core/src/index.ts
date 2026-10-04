@@ -8,3 +8,11 @@ export { JOB_STATUSES } from './types';
 export { findRoot } from './root';
 export { htmlToText, normalizeKey, dedupeKey, normalizeForMatch } from './text';
 export { detectAts, findAtsInHtml } from './sources/ats-detect';
+
+// Config, profile, scoring, database
+export * from './config';
+export * from './profile';
+export * from './score/schema';
+export * from './db/schema';
+export * from './db/client';
+export * from './db/repo';
