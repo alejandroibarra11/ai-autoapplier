@@ -38,6 +38,38 @@ describe('answers', () => {
     const b = parseAnswers(`${example}\nextraMatchers:\n  - { pattern: "hourly rate", key: salaryExpectation }\n`);
     expect(matchFixedAnswer(q('Desired hourly rate'), b)?.key).toBe('salaryExpectation');
   });
+
+  // Regression tests from controller fix round 1
+
+  it('work-authorization matcher requires US in label', () => {
+    expect(matchFixedAnswer(q('Are you authorized to work in Canada?'), a)).toBeNull();
+  });
+
+  it('returns null for textarea questions', () => {
+    expect(matchFixedAnswer(q('Describe a project on GitHub you are proud of', { type: 'textarea' }), a)).toBeNull();
+  });
+
+  it('ignores english matcher for non-English-level questions', () => {
+    expect(matchFixedAnswer(q('Please write a cover letter in English'), a)).toBeNull();
+  });
+
+  it('still matches tightened English matcher for rate questions', () => {
+    expect(matchFixedAnswer(q('How would you rate your English?'), a)?.key).toBe('englishLevel');
+  });
+
+  it('rejects invalid extraMatchers.key values', () => {
+    expect(() => parseAnswers(`${example}\nextraMatchers:\n  - { pattern: "test", key: invalidKey }\n`)).toThrow();
+  });
+
+  it('accepts valid extraMatchers.key values', () => {
+    const b = parseAnswers(`${example}\nextraMatchers:\n  - { pattern: "test", key: email }\n`);
+    expect(b.extraMatchers).toHaveLength(1);
+    expect(b.extraMatchers[0]!.key).toBe('email');
+  });
+
+  it('accepts curly apostrophe in preferred-name matcher', () => {
+    expect(matchFixedAnswer(q("What's the name you'd prefer us to use?"), a)?.key).toBe('firstName');
+  });
 });
 
 describe('pickOption', () => {
@@ -46,4 +78,18 @@ describe('pickOption', () => {
     expect(pickOption("No — I'm based in Mexico", ['Yes, H-1B', 'No'])).toBe('No');
   });
   it('returns null when nothing fits', () => expect(pickOption('Mexico', ['USA', 'Canada'])).toBeNull());
+
+  // Regression tests from controller fix round 1
+
+  it('does not match yes/no against partial option strings', () => {
+    expect(pickOption('No', ['No, but I will need it later'])).toBeNull();
+  });
+
+  it('matches yes/no when option is exactly yes/no', () => {
+    expect(pickOption("No — I'm based in Mexico", ['Yes, H-1B', 'No'])).toBe('No');
+  });
+
+  it('matches yes/no when option is exactly yes/no ignoring trailing punctuation', () => {
+    expect(pickOption('No', ['Not applicable', 'No'])).toBe('No');
+  });
 });

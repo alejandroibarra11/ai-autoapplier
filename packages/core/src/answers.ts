@@ -3,6 +3,8 @@ import YAML from 'yaml';
 import { z } from 'zod';
 import type { FormQuestion } from './apply/types';
 
+const stringAnswerKeys = z.enum(['fullName', 'firstName', 'email', 'phone', 'country', 'location', 'timezone', 'workAuthorizationUS', 'sponsorship', 'salaryExpectation', 'noticePeriod', 'englishLevel', 'linkedin', 'github', 'portfolio']);
+
 export const AnswersSchema = z.object({
   fullName: z.string().min(1),
   email: z.string().min(3),
@@ -18,7 +20,7 @@ export const AnswersSchema = z.object({
   linkedin: z.string().min(1),
   github: z.string().min(1),
   portfolio: z.string().optional(),
-  extraMatchers: z.array(z.object({ pattern: z.string(), key: z.string() })).default([]),
+  extraMatchers: z.array(z.object({ pattern: z.string(), key: stringAnswerKeys })).default([]),
 });
 export type Answers = z.infer<typeof AnswersSchema>;
 export type AnswerKey =
@@ -26,7 +28,7 @@ export type AnswerKey =
   | 'sponsorship' | 'salaryExpectation' | 'noticePeriod' | 'englishLevel' | 'linkedin' | 'github' | 'portfolio';
 
 const DEFAULT_MATCHERS: [RegExp, AnswerKey][] = [
-  [/authori[sz]ed to work|work authori[sz]ation|legally (able|eligible|permitted) to work/i, 'workAuthorizationUS'],
+  [/(?=.*(authori[sz]ed to work|work authori[sz]ation|legally (able|eligible|permitted) to work))(?=.*(united states|u\.s\.a?\.?|\busa\b|\bus\b|america))/i, 'workAuthorizationUS'],
   [/sponsor/i, 'sponsorship'],
   [/linkedin/i, 'linkedin'],
   [/github/i, 'github'],
@@ -36,8 +38,8 @@ const DEFAULT_MATCHERS: [RegExp, AnswerKey][] = [
   [/country of residence|which country|country are you/i, 'country'],
   [/time ?zone/i, 'timezone'],
   [/where are you (located|based)|current location|city of residence/i, 'location'],
-  [/english/i, 'englishLevel'],
-  [/prefer(red)? name|name you'?d prefer/i, 'firstName'],
+  [/english (level|proficiency|skills)|proficiency in english|rate your english|english fluency/i, 'englishLevel'],
+  [/prefer(red)? name|name you'?d prefer|name you'?d prefer/i, 'firstName'],
 ];
 
 export function parseAnswers(yamlText: string): Answers {
@@ -58,8 +60,9 @@ export function answerValue(a: Answers, key: AnswerKey): string | undefined {
 }
 
 export function matchFixedAnswer(q: FormQuestion, a: Answers): { key: AnswerKey; value: string } | null {
+  if (q.type === 'textarea') return null;
   const matchers: [RegExp, AnswerKey][] = [
-    ...a.extraMatchers.map((m) => [new RegExp(m.pattern, 'i'), m.key as AnswerKey] as [RegExp, AnswerKey]),
+    ...a.extraMatchers.map((m) => [new RegExp(m.pattern, 'i'), m.key] as [RegExp, AnswerKey]),
     ...DEFAULT_MATCHERS,
   ];
   for (const [re, key] of matchers) {
@@ -72,9 +75,17 @@ export function matchFixedAnswer(q: FormQuestion, a: Answers): { key: AnswerKey;
 
 export function pickOption(value: string, options: string[]): string | null {
   const v = value.trim().toLowerCase();
+  // Exact match (case-insensitive)
   const exact = options.find((o) => o.trim().toLowerCase() === v);
   if (exact) return exact;
+  // Leading word match for yes/no style answers
   const lead = v.split(/[\s,—–-]+/)[0];
-  if (!lead) return null;
-  return options.find((o) => o.trim().toLowerCase() === lead) ?? options.find((o) => o.trim().toLowerCase().split(/[\s,—–-]+/)[0] === lead && (lead === 'yes' || lead === 'no')) ?? null;
+  if (lead === 'yes' || lead === 'no') {
+    return options.find((o) => {
+      const trimmed = o.trim().toLowerCase();
+      const withoutPunc = trimmed.replace(/[.!?]*$/, '');
+      return withoutPunc === lead;
+    }) ?? null;
+  }
+  return null;
 }
