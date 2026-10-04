@@ -26,8 +26,14 @@ export function parseHimalayas(raw: unknown): NormalizedJob[] {
       sourceJobId: j.guid,
       company: j.companyName.trim(),
       title: j.title.trim(),
-      locationText: restrictions.length ? restrictions.join('; ') : 'Anywhere',
-      description: [j.employmentType ? `Employment type: ${j.employmentType}` : '', htmlToText(html)].filter(Boolean).join('\n\n'),
+      // No restrictions is board metadata, not a statement by the employer: keep it out of locationText
+      // (quotable evidence) and mark it so evidenceText() drops it.
+      locationText: restrictions.join('; '),
+      description: [
+        restrictions.length ? '' : 'Board metadata: no location restrictions listed',
+        j.employmentType ? `Employment type: ${j.employmentType}` : '',
+        htmlToText(html),
+      ].filter(Boolean).join('\n\n'),
       applyUrl: ats?.url ?? j.applicationLink,
       ats: ats?.ats ?? null,
       atsToken: ats?.token ?? null,

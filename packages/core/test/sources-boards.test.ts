@@ -53,9 +53,11 @@ describe('parseHimalayas', () => {
       { guid: 'g2', title: 'ETL', companyName: 'Seq', locationRestrictions: ['Mexico', 'Colombia'], timezoneRestrictions: [], minSalary: null, maxSalary: null,
         currency: null, salaryPeriod: null, pubDate: 1791036915, applicationLink: 'https://himalayas.app/y', description: '', employmentType: 'Full Time' },
     ] });
-    expect(list[0]).toMatchObject({ source: 'himalayas', sourceJobId: 'g1', company: 'Lingo', locationText: 'Anywhere',
+    expect(list[0]).toMatchObject({ source: 'himalayas', sourceJobId: 'g1', company: 'Lingo', locationText: '',
       compMin: 100, compMax: 150, compCurrency: 'USD', compPeriod: 'hour' });
     expect(list[0]!.description).toContain('Employment type: Contractor');
+    expect(list[0]!.description.split('\n')[0]).toBe('Board metadata: no location restrictions listed');
+    expect(list[1]!.description).not.toContain('Board metadata');
     expect(list[0]!.postedAt.getTime()).toBe(1791052678 * 1000);
     expect(list[1]).toMatchObject({ locationText: 'Mexico; Colombia', compPeriod: null });
   });

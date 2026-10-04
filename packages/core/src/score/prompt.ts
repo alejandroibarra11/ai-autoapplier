@@ -15,8 +15,15 @@ function truncatedDescription(description: string): string {
   return description.length > MAX_POSTING_CHARS ? `${description.slice(0, MAX_POSTING_CHARS)}\n[description truncated]` : description;
 }
 
+export const BOARD_METADATA_PREFIX = 'Board metadata:';
+
+function withoutBoardMetadata(description: string): string {
+  return description.split('\n').filter((l) => !l.trimStart().startsWith(BOARD_METADATA_PREFIX)).join('\n');
+}
+
+/** Text the eligibility quote is checked against: Location line + description, minus synthetic board metadata. */
 export function evidenceText(job: Pick<JobRow, 'locationText' | 'description'>): string {
-  return `${job.locationText ? `Location: ${job.locationText}\n\n` : ''}${truncatedDescription(job.description)}`;
+  return `${job.locationText ? `Location: ${job.locationText}\n\n` : ''}${truncatedDescription(withoutBoardMetadata(job.description))}`;
 }
 
 export function jobContextText(job: ContextJob): string {

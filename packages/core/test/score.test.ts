@@ -62,6 +62,13 @@ describe('evidenceText', () => {
     expect(evidenceFound('Location: Remote - LATAM', text)).toBe(true);
     expect(evidenceFound('Location: not stated', evidenceText({ ...makeJob(), locationText: '' }))).toBe(false);
   });
+  it('excludes Board metadata lines so they cannot be quoted as evidence', () => {
+    const job = { ...makeJob(), locationText: '', description: 'Board metadata: no location restrictions listed\n\nWe build LLM tools.' };
+    const text = evidenceText(job);
+    expect(evidenceFound('no location restrictions listed', text)).toBe(false);
+    expect(evidenceFound('We build LLM tools', text)).toBe(true);
+    expect(jobContextText(job)).toContain('Board metadata: no location restrictions listed');
+  });
 });
 
 describe('jobContextText', () => {
