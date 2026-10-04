@@ -34,6 +34,9 @@ describe('runFill', () => {
     expect(sub.dryRun).toBe(true);
     expect(sub.submittedAt).toBeNull();
     expect(sub.plan.entries.find((e) => e.fieldId === 'question_3')).toMatchObject({ value: 'Because I like it', source: 'draft' });
+    // The fill report is stored: the cover letter went in (via "Enter manually"); LinkedIn/GitHub are not on this form.
+    expect(sub.report!.filled).toEqual(expect.arrayContaining(['identity:firstName', 'identity:resume', 'identity:coverLetter', 'question_3']));
+    expect(sub.report!.notFound).toEqual(expect.arrayContaining(['identity:linkedin', 'identity:github']));
     expect(state.posted).toEqual([]);
     expect(pages.opened.every((p) => p.isClosed())).toBe(true);
     expect(listEvents(r.db, r.jobId).map((e) => e.toStatus).slice(-2)).toEqual(['filling', 'awaiting_submit']);
@@ -146,6 +149,7 @@ describe('runFill', () => {
     const sub = latestSubmission(r.db, r.jobId)!;
     expect(sub.result).toBe('blocked');
     expect(sub.evidence).toContain('field not found: Extra question');
+    expect(sub.report!.notFound).toContain('question_99');
     expect(sub.fillShot && existsSync(sub.fillShot)).toBe(true);
     expect(state.posted).toEqual([]);
   }, 90_000);

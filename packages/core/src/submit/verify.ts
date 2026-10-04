@@ -13,3 +13,21 @@ export function verifyFill(plan: FillPlan, report: FilledReport): string[] {
   for (const l of report.requiredEmpty) out.push(`required field empty: ${l}`);
   return out;
 }
+
+export interface FillSummary { filled: number; notOnForm: string[]; cvAttached: boolean }
+
+/**
+ * Card/dashboard counts. With the stored fill report: fields actually filled (files excluded), labels of non-empty
+ * identity entries the form does not have, and whether a file went in. Older rows without a report use plan counts.
+ */
+export function fillSummary(plan: FillPlan, report: FilledReport | null | undefined): FillSummary {
+  const files = plan.entries.filter((e) => e.kind === 'file' && e.value);
+  if (!report) return { filled: plan.entries.filter((e) => e.kind !== 'file').length, notOnForm: [], cvAttached: files.length > 0 };
+  const filled = new Set(report.filled);
+  const notFound = new Set(report.notFound);
+  return {
+    filled: plan.entries.filter((e) => e.kind !== 'file' && filled.has(e.fieldId)).length,
+    notOnForm: plan.entries.filter((e) => e.source === 'identity' && e.value.trim() && notFound.has(e.fieldId)).map((e) => e.label),
+    cvAttached: files.some((e) => filled.has(e.fieldId)),
+  };
+}

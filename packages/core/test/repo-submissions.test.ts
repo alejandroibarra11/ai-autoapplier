@@ -27,6 +27,14 @@ describe('submissions repo', () => {
     expect(s.plan.entries[0]!.value).toBe('a@b.c');
     expect(s.dryRun).toBe(true);
   });
+  it('stores the fill report (nullable) with the submission', () => {
+    const { db, jobs } = seed();
+    insertSubmission(db, { jobId: jobs[0]!.id, plan, fillShot: null, result: 'blocked' });
+    expect(latestSubmission(db, jobs[0]!.id)!.report).toBeNull();
+    const report = { filled: ['identity:email'], notFound: ['identity:github'], failed: [], requiredEmpty: [] };
+    insertSubmission(db, { jobId: jobs[0]!.id, plan, fillShot: '/a.png', result: 'filled', report });
+    expect(latestSubmission(db, jobs[0]!.id)!.report).toEqual(report);
+  });
   it('counts a clicked row (dryRun false, submittedAt set) regardless of result', () => {
     const { db, jobs } = seed();
     const t = new Date('2026-10-04T12:00:00Z');

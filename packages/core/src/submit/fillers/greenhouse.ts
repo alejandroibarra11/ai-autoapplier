@@ -14,6 +14,27 @@ const sel = (id: string) => `[id="${id.replace(/"/g, '')}"]`;
 const norm = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 const lastSegment = (t: string) => t.split(',').at(-1)!.trim();
 
+const COVER_TEXT = '#cover_letter_text';
+
+/**
+ * Greenhouse only renders the cover-letter textarea after "Enter manually" is clicked in the cover-letter upload group.
+ * The group is the innermost ancestor of the `#cover_letter` file input that has such a button (the resume group has
+ * its own "Enter manually", which must not be clicked). True when the textarea is (now) on the page.
+ */
+async function openCoverLetterText(page: Page): Promise<boolean> {
+  if (await page.locator(COVER_TEXT).count()) return true;
+  const manual = page.getByRole('button', { name: /^\s*enter manually\s*$/i });
+  const group = page.locator('div').filter({ has: page.locator('#cover_letter') }).filter({ has: manual }).last();
+  if (!(await group.count())) return false;
+  try {
+    await group.getByRole('button', { name: /^\s*enter manually\s*$/i }).first().click({ timeout: 5000 });
+    await page.locator(COVER_TEXT).first().waitFor({ state: 'visible', timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function fillIdentity(page: Page, plan: FillPlan, e: FillEntry): Promise<boolean | null> {
   if (!e.value.trim()) return null;
   const text = IDENTITY_TEXT[e.fieldId];
@@ -44,7 +65,7 @@ async function fillIdentity(page: Page, plan: FillPlan, e: FillEntry): Promise<b
       return chooseCombobox(page, '#candidate-location', city, { allowContains: true, accept: (t) => norm(lastSegment(t)) === want });
     }
     case 'identity:resume': return (await page.locator('#resume').count()) ? setFile(page, '#resume', e.value) : null;
-    case 'identity:coverLetter': return (await page.locator('#cover_letter_text').count()) ? fillText(page, '#cover_letter_text', e.value) : null;
+    case 'identity:coverLetter': return (await openCoverLetterText(page)) ? fillText(page, COVER_TEXT, e.value) : null;
     default: return null;
   }
 }

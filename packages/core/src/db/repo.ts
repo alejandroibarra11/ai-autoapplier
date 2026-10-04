@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm';
 import type { Db } from './client';
 import { companies, drafts, jobEvents, jobs, llmUsage, scores, submissions } from './schema';
-import type { FillPlan, SubmissionResult } from '../submit/types';
+import type { FillPlan, FilledReport, SubmissionResult } from '../submit/types';
 import type { DraftAnswer, FormQuestion, CvSelection, ResolvedKind } from '../apply/types';
 import type { Ats, JobStatus, NormalizedJob } from '../types';
 import type { ScorePayload } from '../score/schema';
@@ -217,11 +217,11 @@ export type SubmissionRow = typeof submissions.$inferSelect;
 
 export function insertSubmission(
   db: Db,
-  s: { jobId: number; plan: FillPlan; fillShot: string | null; result: SubmissionResult; evidence?: string | null },
+  s: { jobId: number; plan: FillPlan; fillShot: string | null; result: SubmissionResult; evidence?: string | null; report?: FilledReport | null },
   now = new Date(),
 ): number {
   return db.insert(submissions).values({
-    jobId: s.jobId, plan: s.plan, fillShot: s.fillShot, result: s.result, evidence: s.evidence ?? null, createdAt: now,
+    jobId: s.jobId, plan: s.plan, fillShot: s.fillShot, result: s.result, evidence: s.evidence ?? null, report: s.report ?? null, createdAt: now,
   }).returning({ id: submissions.id }).get().id;
 }
 

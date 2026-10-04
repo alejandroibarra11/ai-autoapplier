@@ -1,4 +1,4 @@
-import type { JobRow, SubmissionRow } from '@autoapplier/core';
+import { fillSummary, type JobRow, type SubmissionRow } from '@autoapplier/core';
 import { cancelSubmission, markApplied } from './actions';
 import { SubmitForm } from './submit-form';
 
@@ -18,6 +18,15 @@ export function SubmitPanel({ job, sub, dryRun }: { job: JobRow; sub: Submission
         ? <p>🧪 <b>Dry run is ON</b> — Submit will not send anything.</p>
         : <p>🔴 <b>Dry run is OFF</b> — Submit will send the application for real.</p>)}
       <p>Result: <b>{RESULT_TEXT[sub.result] ?? sub.result}</b>{sub.evidence ? <span className="muted"> — {sub.evidence}</span> : null}</p>
+      {(() => {
+        const sum = fillSummary(sub.plan, sub.report);
+        return (
+          <p>
+            ✍️ {sum.filled} filled{sub.report ? ` · ${sum.notOnForm.length} not on form` : ''} · {sum.cvAttached ? 'CV attached' : 'no CV'}
+            {sum.notOnForm.length > 0 && <><br /><span className="muted">Not on this form: {sum.notOnForm.join(', ')}</span></>}
+          </p>
+        );
+      })()}
       {sub.fillShot && <p><a href={`/shot/${sub.id}?k=fill`} target="_blank" rel="noreferrer"><img src={`/shot/${sub.id}?k=fill`} alt="Filled form screenshot" style={{ maxWidth: '100%', maxHeight: 480, border: '1px solid var(--line)' }} /></a></p>}
       <table>
         <thead><tr><th>Field</th><th>Value</th><th>Source</th></tr></thead>
@@ -26,7 +35,7 @@ export function SubmitPanel({ job, sub, dryRun }: { job: JobRow; sub: Submission
             <tr key={e.fieldId} style={e.source === 'fill_time' ? { background: 'rgba(250, 204, 21, 0.18)' } : undefined}>
               <td>{e.label}{e.required ? ' *' : ''}</td>
               <td style={{ wordBreak: 'break-word' }}>{e.kind === 'file' ? (e.value ? '📎 attached' : '—') : (e.value || '—')}</td>
-              <td>{e.source === 'fill_time' ? '⚠️ generated at fill time — check' : e.source === 'decline' ? '🚫 decline option (demographic)' : e.source}</td>
+              <td>{sub.report?.notFound.includes(e.fieldId) && e.value ? 'not on this form · ' : ''}{e.source === 'fill_time' ? '⚠️ generated at fill time — check' : e.source === 'decline' ? '🚫 decline option (demographic)' : e.source}</td>
             </tr>
           ))}
         </tbody>

@@ -18,7 +18,7 @@ import { detectCaptchaChallenge, detectLoginWall } from '../submit/detect';
 import { takeShot } from '../submit/screenshot';
 import { fillerFor } from '../submit/fillers';
 import { bodyText } from '../submit/fillers/common';
-import type { AtsFiller, FillPlan } from '../submit/types';
+import type { AtsFiller, FilledReport, FillPlan } from '../submit/types';
 import { withTimeout } from './draft';
 
 export interface PageFactory { newPage(): Promise<Page> }
@@ -82,7 +82,9 @@ export function resetStaleFillSubmit(db: Db, olderThan: Date, now = new Date()):
 }
 
 interface FillCtx { page: Page | null; plan: FillPlan; done: boolean }
-type Outcome = { kind: 'filled'; plan: FillPlan; shot: string | null } | { kind: 'manual'; plan: FillPlan; reasons: string[]; shot: string | null };
+type Outcome =
+  | { kind: 'filled'; plan: FillPlan; shot: string | null; report: FilledReport }
+  | { kind: 'manual'; plan: FillPlan; reasons: string[]; shot: string | null; report?: FilledReport };
 type Prepared = { kind: 'ready'; plan: FillPlan; target: ApplyTarget } | Extract<Outcome, { kind: 'manual' }>;
 
 export const FILL_LLM_TIMEOUT_MS = 90_000;
@@ -135,7 +137,7 @@ async function prepareFill(d: FillDeps, job: JobRow, now: Date, ctx: FillCtx): P
 
 /** Opens the form and fills it from `plan` (the browser step; timed by the caller with submit.fillTimeoutMs). */
 async function browserFill(d: FillDeps, job: JobRow, filler: AtsFiller, target: ApplyTarget, plan: FillPlan, ctx: FillCtx): Promise<Outcome> {
-  const manual = (reasons: string[], shot: string | null = null): Outcome => ({ kind: 'manual', plan, reasons, shot });
+  const manual = (reasons: string[], shot: string | null = null, report?: FilledReport): Outcome => ({ kind: 'manual', plan, reasons, shot, report });
   const page = await d.pages.newPage();
   if (ctx.done) { await page.close().catch(() => {}); throw new Error('fill abandoned'); }
   ctx.page = page;
@@ -144,9 +146,9 @@ async function browserFill(d: FillDeps, job: JobRow, filler: AtsFiller, target: 
   const report = await filler.fill(page, plan);
   const shot = await safeShot(page, shotPath(d.shotsDir, job.id, 'fill'));
   const mismatches = verifyFill(plan, report);
-  if (mismatches.length) return manual(mismatches, shot);
-  if (!shot) return manual(['could not take the fill screenshot']);
-  return { kind: 'filled', plan, shot };
+  if (mismatches.length) return manual(mismatches, shot, report);
+  if (!shot) return manual(['could not take the fill screenshot'], null, report);
+  return { kind: 'filled', plan, shot, report };
 }
 
 export async function runFill(d: FillDeps): Promise<FillRunResult> {
@@ -178,12 +180,12 @@ export async function runFill(d: FillDeps): Promise<FillRunResult> {
     }
     try {
       if (out.kind === 'filled') {
-        insertSubmission(db, { jobId: job.id, plan: out.plan, fillShot: out.shot, result: 'filled' }, now);
+        insertSubmission(db, { jobId: job.id, plan: out.plan, fillShot: out.shot, result: 'filled', report: out.report }, now);
         setStatus(db, job.id, 'awaiting_submit', `${out.plan.entries.length} fields planned`, {}, now);
         res.filled++;
       } else {
         const evidence = out.reasons.join('; ');
-        insertSubmission(db, { jobId: job.id, plan: out.plan, fillShot: out.shot, result: 'blocked', evidence }, now);
+        insertSubmission(db, { jobId: job.id, plan: out.plan, fillShot: out.shot, result: 'blocked', evidence, report: out.report ?? null }, now);
         setStatus(db, job.id, 'needs_manual', evidence.slice(0, 500), {}, now);
         res.manual++;
       }

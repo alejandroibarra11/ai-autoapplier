@@ -46,11 +46,32 @@ describe('greenhouseFiller', () => {
     expect(await page.inputValue('#question_3')).toBe('Because I like it');
     expect(await page.locator('.chip').innerText()).toBe('cv.pdf'); // the fixture swaps the input for a chip, like Greenhouse
     expect(r.notFound).toContain('identity:github');
+    // The cover letter textarea only appears after the cover-letter group's "Enter manually" (not the resume's).
+    expect(r.filled).toContain('identity:coverLetter');
+    expect(await page.inputValue('#cover_letter_text')).toBe('Hello');
+    expect(await page.locator('#resume_text').count()).toBe(0);
     expect(posted).toEqual([]); // fill never submits
     const all = [...r.filled, ...r.notFound, ...r.failed].sort();
     expect(all).toEqual(plan.entries.map((x) => x.fieldId).sort());
     const shot = await takeShot(page, join(dir, 'shots', 'a.png'));
     expect(pngSize(shot).width).toBeGreaterThan(100);
+    await page.close();
+  }, 60_000);
+
+  it('an empty cover letter does not open the manual cover-letter field', async () => {
+    const page = await open('greenhouse-form.html');
+    const r = await greenhouseFiller.fill(page, { ...plan, entries: plan.entries.map((x) => (x.fieldId === 'identity:coverLetter' ? { ...x, value: '' } : x)) });
+    expect(r.notFound).toContain('identity:coverLetter');
+    expect(await page.locator('#cover_letter_text').count()).toBe(0);
+    await page.close();
+  }, 60_000);
+
+  it('a form without a cover letter group reports the cover letter as not found', async () => {
+    const page = await open('greenhouse-form.html');
+    await page.evaluate(() => document.getElementById('cover_letter')!.parentElement!.remove());
+    const r = await greenhouseFiller.fill(page, plan);
+    expect(r.notFound).toContain('identity:coverLetter');
+    expect(await page.locator('#resume_text').count()).toBe(0);
     await page.close();
   }, 60_000);
 

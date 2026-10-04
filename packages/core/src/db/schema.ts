@@ -1,7 +1,7 @@
 import { sqliteTable, integer, text, real, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
 import type { Ats, CompPeriod, JobStatus } from '../types';
 import type { ScorePayload } from '../score/schema';
-import type { FillPlan, SubmissionResult } from '../submit/types';
+import type { FillPlan, FilledReport, SubmissionResult } from '../submit/types';
 import type { ResolvedKind, DraftAnswer, FormQuestion, CvSelection } from '../apply/types';
 
 export const companies = sqliteTable('companies', {
@@ -102,6 +102,8 @@ export const submissions = sqliteTable('submissions', {
   dryRun: integer('dry_run', { mode: 'boolean' }).notNull().default(true),
   result: text('result').$type<SubmissionResult>().notNull(),
   evidence: text('evidence'),
+  /** What the fill step reported (filled / not on the form / failed); null when no page was filled. */
+  report: text('report', { mode: 'json' }).$type<FilledReport>(),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   submittedAt: integer('submitted_at', { mode: 'timestamp' }),
   notifiedAt: integer('notified_at', { mode: 'timestamp' }),

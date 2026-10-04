@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { InlineKeyboard } from 'grammy';
 import {
-  claimStatus, getJob, latestDraft, latestSubmission, listUnnotifiedSubmissions, pngSize, STALE_SUBMIT_NOTE, updateSubmission,
+  claimStatus, fillSummary, getJob, latestDraft, latestSubmission, listUnnotifiedSubmissions, pngSize, STALE_SUBMIT_NOTE, updateSubmission,
   type Config, type Db, type JobRow, type SubmissionRow, type SubmitRunResult,
 } from '@autoapplier/core';
 import { sendReady, type DraftSender } from './drafts';
@@ -49,9 +49,10 @@ export function markAppliedKeyboard(jobId: number): InlineKeyboard {
 
 function fillCardParts(job: JobRow, sub: SubmissionRow, dryRun: boolean): { head: string[]; details: string[] } {
   const entries = sub.plan.entries;
-  const fields = entries.filter((e) => e.kind !== 'file').length;
-  const cv = entries.some((e) => e.kind === 'file' && e.value);
-  const head = [`🧾 <b>${jobName(job)}</b>`, `✍️ ${fields} fields filled · ${cv ? 'CV attached' : 'no CV'}`];
+  const sum = fillSummary(sub.plan, sub.report);
+  const counts = [`${sum.filled} filled`, ...(sub.report ? [`${sum.notOnForm.length} not on form`] : []), sum.cvAttached ? 'CV attached' : 'no CV'];
+  const head = [`🧾 <b>${jobName(job)}</b>`, `✍️ ${counts.join(' · ')}`];
+  if (sum.notOnForm.length) head.push(`Not on this form: ${esc(sum.notOnForm.join(', '), 300)}`);
   if (dryRun) head.push(DRY_RUN_BANNER);
   const fillTime = entries.filter((e) => e.source === 'fill_time');
   const details = fillTime.slice(0, MAX_FILL_TIME_LISTED)

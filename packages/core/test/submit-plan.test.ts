@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildFillPlan, isDemographic, pickDecline } from '../src/submit/plan';
-import { verifyFill } from '../src/submit/verify';
+import { fillSummary, verifyFill } from '../src/submit/verify';
 import { parseAnswers } from '../src/answers';
 import { loadProfile } from '../src/profile';
 import { findRoot } from '../src/root';
@@ -90,5 +90,24 @@ describe('verifyFill', () => {
     expect(verifyFill(plan, { filled: [], notFound: ['q_why'], failed: ['q_auth'], requiredEmpty: ['Location (City)'] })).toEqual([
       'field not found: Why us?', 'could not set: Authorized in the US?', 'required field empty: Location (City)',
     ]);
+  });
+});
+
+describe('fillSummary', () => {
+  const en = (fieldId: string, label: string, value: string, kind: 'text' | 'file' = 'text', source: 'identity' | 'draft' = 'identity') =>
+    ({ fieldId, label, kind, value, source, required: false });
+  const plan = { missingRequired: [], manualReasons: [], entries: [
+    en('identity:firstName', 'First name', 'Jane'), en('identity:linkedin', 'LinkedIn', 'https://l'), en('identity:github', 'GitHub', ''),
+    en('identity:resume', 'Resume', '/cv.pdf', 'file'), en('q1', 'Why?', 'x', 'text', 'draft'),
+  ] };
+
+  it('counts from the fill report: filled (non-file), non-empty identity entries not on the form, CV attached', () => {
+    const report = { filled: ['identity:firstName', 'identity:resume', 'q1'], notFound: ['identity:linkedin', 'identity:github'], failed: [], requiredEmpty: [] };
+    expect(fillSummary(plan, report)).toEqual({ filled: 2, notOnForm: ['LinkedIn'], cvAttached: true });
+    expect(fillSummary(plan, { ...report, filled: ['identity:firstName', 'q1'], notFound: ['identity:resume'] }).cvAttached).toBe(false);
+  });
+
+  it('falls back to plan counts for rows without a report', () => {
+    expect(fillSummary(plan, null)).toEqual({ filled: 4, notOnForm: [], cvAttached: true });
   });
 });

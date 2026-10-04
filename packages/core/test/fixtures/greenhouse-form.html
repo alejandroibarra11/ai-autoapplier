@@ -8,8 +8,9 @@
   <div><label for="phone">Phone *</label><input id="phone" name="phone" type="tel" required aria-required="true"></div>
   <div class="cb"><label for="country">Country *</label><input id="country" role="combobox" autocomplete="off" required aria-required="true" data-options="Mexico|Mexico City|United States|Guatemala"></div>
   <div class="cb"><label for="candidate-location">Location (City) *</label><input id="candidate-location" role="combobox" autocomplete="off" required aria-required="true" data-options="Mazatlán, Sinaloa, Mexico|Mazatlán, Mexico|Mazatenango, Guatemala"></div>
-  <div><label>Resume/CV</label><button type="button" onclick="document.getElementById('resume').click()">Attach</button><input id="resume" name="resume" type="file" style="display:none"></div>
-  <div><label>Cover Letter</label><button type="button" onclick="document.getElementById('cover_letter').click()">Attach</button><input id="cover_letter" name="cover_letter" type="file" style="display:none"></div>
+  <div class="file-upload"><label>Resume/CV</label><button type="button" onclick="document.getElementById('resume').click()">Attach</button><button type="button" onclick="this.replaceWith(Object.assign(document.createElement('textarea'), { id: 'resume_text', name: 'resume_text' }))">Enter manually</button><input id="resume" name="resume" type="file" style="display:none"></div>
+  <!-- Like Greenhouse: the cover letter textarea only exists after "Enter manually" is clicked. -->
+  <div class="file-upload"><label>Cover Letter</label><button type="button" onclick="document.getElementById('cover_letter').click()">Attach</button><button type="button" onclick="this.replaceWith(Object.assign(document.createElement('textarea'), { id: 'cover_letter_text', name: 'cover_letter_text' }))">Enter manually</button><input id="cover_letter" name="cover_letter" type="file" style="display:none"></div>
   <div><label for="question_1">LinkedIn Profile *</label><input id="question_1" name="question_1" type="text" required aria-required="true"></div>
   <div class="cb"><label for="question_2">Are you authorized to work? *</label><input id="question_2" role="combobox" autocomplete="off" required aria-required="true" data-options="Yes|No"></div>
   <div><label for="question_3">Why us? *</label><textarea id="question_3" name="question_3" required aria-required="true"></textarea></div>

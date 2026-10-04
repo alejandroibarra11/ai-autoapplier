@@ -78,10 +78,21 @@ describe('formatFillCard', () => {
     const card = formatFillCard(getJob(db, id)!, latestSubmission(db, id)!, true);
     expect(card).toContain('Voice &lt;AI&gt; Engineer');
     expect(card).toContain('Acme &amp; Co');
-    expect(card).toContain('✍️ 3 fields filled · CV attached');
+    expect(card).toContain('✍️ 3 filled · CV attached'); // no fill report (older row): plan counts
     expect(card).toContain('⚠️ Why &lt;Acme&gt;?: Because &amp; so');
     expect(card).toContain('🧪 Dry run is ON — Submit will not send anything');
     expect(formatFillCard(getJob(db, id)!, latestSubmission(db, id)!, false)).not.toContain('Dry run');
+  });
+  it('counts from the stored fill report and lists non-empty identity fields that are not on the form', () => {
+    const plan: FillPlan = { ...PLAN, entries: [...PLAN.entries, entry('identity:linkedin', 'LinkedIn', 'https://l'), entry('identity:github', 'GitHub <x>', 'https://g'), entry('identity:portfolio', 'Portfolio', '')] };
+    const { db, id, subId } = setup({ plan });
+    db.$client.prepare('update submissions set report = ? where id = ?').run(JSON.stringify({
+      filled: ['first_name', 'resume', 'question_1'], notFound: ['email', 'identity:linkedin', 'identity:github', 'identity:portfolio'], failed: [], requiredEmpty: [],
+    }), subId);
+    const card = formatFillCard(getJob(db, id)!, latestSubmission(db, id)!, false);
+    expect(card).toContain('✍️ 2 filled · 3 not on form · CV attached');
+    expect(card).toContain('Not on this form: Email, LinkedIn, GitHub &lt;x&gt;');
+    expect(card).not.toContain('Portfolio');
   });
   it('caps the fill-time answers it lists', () => {
     const many = { ...PLAN, entries: Array.from({ length: 12 }, (_, i) => entry(`q${i}`, `Question ${i}`, 'x'.repeat(500), 'fill_time')) };
