@@ -1,7 +1,9 @@
 import { notFound } from 'next/navigation';
-import { formatComp, getJob, latestDraft, latestScore, listEvents } from '@autoapplier/core';
+import { join } from 'node:path';
+import { findRoot, formatComp, getJob, latestDraft, latestScore, latestSubmission, listEvents, loadConfig } from '@autoapplier/core';
 import { getDb } from '../../../lib/db';
 import { DraftPanel } from './draft-panel';
+import { SubmitPanel } from './submit-panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +15,9 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
   const score = latestScore(db, job.id);
   const draft = latestDraft(db, job.id);
   const events = listEvents(db, job.id);
+  const sub = latestSubmission(db, job.id);
+  let dryRun = true; // fail safe: show dry-run if the config can't be read
+  try { dryRun = loadConfig(join(/*turbopackIgnore: true*/ findRoot(), 'config.yaml')).submit.dryRun; } catch { /* keep default */ }
   return (
     <>
       <div className="card">
@@ -21,6 +26,7 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
         <a href={job.applyUrl} target="_blank" rel="noreferrer">Open posting ↗</a>
       </div>
       <DraftPanel job={job} draft={draft} />
+      <SubmitPanel job={job} sub={sub} dryRun={dryRun} />
       {score && (
         <div className="card">
           <p><b>Fit {score.fitScore}</b> · {score.roleCategory} · eligibility <b>{score.eligibility}</b></p>

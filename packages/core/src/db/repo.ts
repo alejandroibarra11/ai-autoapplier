@@ -215,6 +215,10 @@ export function latestSubmission(db: Db, jobId: number): SubmissionRow | undefin
   return db.select().from(submissions).where(eq(submissions.jobId, jobId)).orderBy(desc(submissions.id)).limit(1).get();
 }
 
+export function getSubmission(db: Db, id: number): SubmissionRow | undefined {
+  return db.select().from(submissions).where(eq(submissions.id, id)).get();
+}
+
 export function updateSubmission(
   db: Db,
   id: number,

@@ -54,3 +54,13 @@ describe('submissions repo', () => {
     expect(listUnnotifiedSubmissions(db, 10)).toEqual([]);
   });
 });
+
+import { getSubmission } from '../src/db/repo';
+describe('getSubmission', () => {
+  it('returns a row by id, undefined when missing', () => {
+    const { db, jobs } = seed();
+    const id = insertSubmission(db, { jobId: jobs[0]!.id, plan, fillShot: '/a.png', result: 'filled' });
+    expect(getSubmission(db, id)?.fillShot).toBe('/a.png');
+    expect(getSubmission(db, id + 99)).toBeUndefined();
+  });
+});

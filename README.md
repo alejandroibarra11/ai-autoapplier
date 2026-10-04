@@ -54,6 +54,8 @@ Limits (`config.yaml` `submit`): at most one real submission every `minSecondsBe
 
 "Finish manually" (`needs_manual`) means the worker stopped before clicking: a login wall or captcha, a required question it could not answer truthfully, a field it could not find or verify, the form changed between the screenshot and Submit, or you tapped ✋ Cancel. You get the screenshot of where it stopped plus the copy-paste messages; apply in your browser and tap 📨 Mark applied. `submit_failed` means the click happened (or may have) but no confirmation was seen: check your email before re-applying, then tap 📨 Mark applied if it went through. The same applies if the worker restarted mid-submit.
 
+The dashboard job page (`/jobs/<id>`) also shows the fill screenshot, the field plan (fill-time answers highlighted), and 🚀 Submit / ✋ Cancel for `awaiting_submit` jobs and 📨 Mark applied for `needs_manual` / `submit_failed`. Dashboard Submit uses the same rules, limits and mode check as Telegram (a page rendered under another dry-run setting re-fills instead of submitting) and its own browser profile `data/browser-dashboard`.
+
 Screenshots are saved under `data/screenshots/` (git-ignored; they contain your personal data).
 
 Fill one ready_to_apply job by hand (prints the plan, the result and the screenshot path; never submits — there is no CLI submit; uses the `data/browser-cli` profile, so it can run while the service is up; if the service is running it will then send the Telegram card for that job):
