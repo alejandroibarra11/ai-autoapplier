@@ -45,3 +45,10 @@ describe('drafting config', () => {
     expect(cfg.browser).toEqual({ headless: true, timeoutMs: 20000 });
   });
 });
+
+describe('submit config', () => {
+  it('loads submit section', () => {
+    const cfg = loadConfig(join(findRoot(), 'config.yaml'));
+    expect(cfg.submit).toEqual({ dryRun: true, dailyLimit: 15, minSecondsBetween: 120, fillTimeoutMs: 60000 });
+  });
+});

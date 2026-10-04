@@ -49,6 +49,12 @@ export const ConfigSchema = z.object({
     pollSeconds: z.number().int().min(10),
   }),
   browser: z.object({ headless: z.boolean(), timeoutMs: z.number().int().positive() }),
+  submit: z.object({
+    dryRun: z.boolean(),
+    dailyLimit: z.number().int().min(1),
+    minSecondsBetween: z.number().int().min(0),
+    fillTimeoutMs: z.number().int().positive(),
+  }),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 

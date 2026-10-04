@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import type { Db } from './client';
-import { companies, drafts, jobEvents, jobs, llmUsage, scores } from './schema';
+import { companies, drafts, jobEvents, jobs, llmUsage, scores, submissions } from './schema';
+import type { FillPlan, SubmissionResult } from '../submit/types';
 import type { DraftAnswer, FormQuestion, CvSelection, ResolvedKind } from '../apply/types';
 import type { Ats, JobStatus, NormalizedJob } from '../types';
 import type { ScorePayload } from '../score/schema';
@@ -196,4 +197,60 @@ export function listUnnotifiedDraftFailures(db: Db, limit: number): { job: JobRo
 
 export function markDraftFailureNotified(db: Db, jobId: number, now = new Date()): void {
   db.update(jobs).set({ draftFailureNotifiedAt: now }).where(eq(jobs.id, jobId)).run();
+}
+
+export type SubmissionRow = typeof submissions.$inferSelect;
+
+export function insertSubmission(
+  db: Db,
+  s: { jobId: number; plan: FillPlan; fillShot: string | null; result: SubmissionResult; evidence?: string | null },
+  now = new Date(),
+): number {
+  return db.insert(submissions).values({
+    jobId: s.jobId, plan: s.plan, fillShot: s.fillShot, result: s.result, evidence: s.evidence ?? null, createdAt: now,
+  }).returning({ id: submissions.id }).get().id;
+}
+
+export function latestSubmission(db: Db, jobId: number): SubmissionRow | undefined {
+  return db.select().from(submissions).where(eq(submissions.jobId, jobId)).orderBy(desc(submissions.id)).limit(1).get();
+}
+
+export function updateSubmission(
+  db: Db,
+  id: number,
+  patch: Partial<{ submitShot: string | null; result: SubmissionResult; evidence: string | null; dryRun: boolean; submittedAt: Date | null; notifiedAt: Date | null }>,
+): void {
+  if (Object.keys(patch).length === 0) return;
+  db.update(submissions).set(patch).where(eq(submissions.id, id)).run();
+}
+
+const realSubmission = and(eq(submissions.dryRun, false), inArray(submissions.result, ['submitted', 'failed']));
+
+export function countRealSubmissionsSince(db: Db, since: Date): number {
+  return db.select({ n: sql<number>`count(*)` }).from(submissions)
+    .where(and(realSubmission, gte(submissions.submittedAt, since))).get()?.n ?? 0;
+}
+
+export function lastRealSubmissionAt(db: Db): Date | null {
+  const row = db.select({ at: submissions.submittedAt }).from(submissions)
+    .where(realSubmission).orderBy(desc(submissions.submittedAt)).limit(1).get();
+  return row?.at ?? null;
+}
+
+export function listUnnotifiedSubmissions(db: Db, limit: number): { job: JobRow; sub: SubmissionRow }[] {
+  const out: { job: JobRow; sub: SubmissionRow }[] = [];
+  const ids = db.selectDistinct({ jobId: submissions.jobId }).from(submissions).orderBy(asc(submissions.jobId)).all();
+  for (const { jobId } of ids) {
+    const sub = latestSubmission(db, jobId);
+    const job = getJob(db, jobId);
+    if (sub && job && !sub.notifiedAt) out.push({ job, sub });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+export function listJobsForFilling(db: Db, limit: number): JobRow[] {
+  return db.select().from(jobs)
+    .where(and(eq(jobs.status, 'ready_to_apply'), inArray(jobs.resolvedKind, ['greenhouse', 'lever', 'ashby'])))
+    .orderBy(asc(jobs.updatedAt), asc(jobs.id)).limit(limit).all();
 }
