@@ -21,9 +21,10 @@ export async function fillText(page: Page, selector: string, value: string): Pro
 export interface ComboOpts {
   allowContains?: boolean;
   accept?: (optionText: string) => boolean;
-  /** Custom read-back check, given the input value, selected-value text and container text. */
-  verify?: (seen: string[], chosen: string) => boolean;
+  /** Custom read-back check on what the widget shows after the click. */
+  verify?: (seen: Seen, chosen: string) => boolean;
 }
+export interface Seen { value: string; single: string; text: string; chips: string[]; labels: string[] }
 
 /** Click, type, then click the matching option. Exact (case-insensitive) match unless allowContains; verified by read-back. */
 export async function chooseCombobox(page: Page, inputSelector: string, value: string, opts: ComboOpts = {}): Promise<boolean> {
@@ -37,12 +38,10 @@ export async function chooseCombobox(page: Page, inputSelector: string, value: s
     await input.click({ timeout: T });
     await input.fill('', { timeout: T }).catch(() => {});
     await input.pressSequentially(typed, { delay: 30, timeout: T });
-    // :visible matters: widgets such as the phone country picker keep a hidden listbox in the DOM.
-    await page.locator('[role="option"]:visible').first().waitFor({ state: 'visible', timeout: 3000 });
+    // Prefer the input's own listbox; :visible matters otherwise (the phone country picker keeps a hidden listbox in the DOM).
     const ctl = await input.getAttribute('aria-controls');
-    const options = ctl && (await page.locator(`[id="${ctl.replace(/"/g, '')}"]`).count())
-      ? page.locator(`[id="${ctl.replace(/"/g, '')}"] [role="option"]`)
-      : page.locator('[role="option"]:visible');
+    const options = ctl ? page.locator(`[id="${ctl.replace(/"/g, '')}"] [role="option"]`) : page.locator('[role="option"]:visible');
+    await options.first().waitFor({ state: 'visible', timeout: 3000 });
     // Async autocompletes refresh the list after typing: wait until two reads agree.
     let texts = (await options.allInnerTexts()).map((t) => t.trim());
     for (let i = 0; i < 6; i++) {
@@ -70,13 +69,19 @@ export async function chooseCombobox(page: Page, inputSelector: string, value: s
 async function selectedMatches(input: Locator, chosen: string, verify?: ComboOpts['verify']): Promise<boolean> {
   const want = norm(chosen);
   for (let i = 0; i < 6; i++) {
-    const seen = await input.evaluate((el) => {
+    const seen: Seen = await input.evaluate((el) => {
       const i = el as HTMLInputElement;
-      const wrap = i.closest('[class*="select__control"], [class*="control"]') ?? i.parentElement;
-      const single = wrap?.querySelector('[class*="single-value"], [class*="singleValue"]')?.textContent ?? '';
-      return [i.value ?? '', single, ((wrap as HTMLElement | null)?.innerText ?? '').trim()];
-    }).catch(() => ['', '', '']);
-    if (verify ? verify(seen, chosen) : seen.slice(0, 2).some((t) => t && norm(t) === want)) return true;
+      const wrap = (i.parentElement?.closest('[class*="select__control"], [class*="control"]') as HTMLElement | null) ?? i.parentElement;
+      // no named inner functions here: tsx would inject __name into the page
+      return {
+        value: i.value ?? '',
+        single: wrap?.querySelector('[class*="single-value"], [class*="singleValue"]')?.textContent ?? '',
+        text: (wrap?.innerText ?? '').trim(),
+        chips: Array.from(wrap?.querySelectorAll('[class*="multi-value__label"], [class*="multiValue__label"]') ?? []).map((n) => (n.textContent ?? '').trim()),
+        labels: Array.from(wrap?.querySelectorAll('[aria-label], [title], img[alt]') ?? []).filter((n) => n !== i && n.tagName !== 'BUTTON').map((n) => n.getAttribute('aria-label') ?? n.getAttribute('title') ?? n.getAttribute('alt') ?? ''),
+      };
+    }).catch(() => ({ value: '', single: '', text: '', chips: [], labels: [] }));
+    if (verify ? verify(seen, chosen) : [seen.value, seen.single].some((t) => t && norm(t) === want)) return true;
     await input.page().waitForTimeout(200);
   }
   return false;

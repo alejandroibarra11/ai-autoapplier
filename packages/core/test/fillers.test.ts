@@ -179,6 +179,30 @@ describe('greenhouseFiller', () => {
     await page.close();
   }, 60_000);
 
+  it('multiselect verifies chips; unknown value fails', async () => {
+    const page = await open('greenhouse-form.html');
+    const r = await greenhouseFiller.fill(page, { missingRequired: [], manualReasons: [], entries: [e('question_6', 'A; C', 'multiselect')] });
+    expect(r.filled).toContain('question_6');
+    expect(await page.locator('.select__multi-value__label').allInnerTexts()).toEqual(['A', 'C']);
+    const page2 = await open('greenhouse-form.html');
+    const r2 = await greenhouseFiller.fill(page2, { missingRequired: [], manualReasons: [], entries: [e('question_6', 'A; Z', 'multiselect')] });
+    expect(r2.failed).toContain('question_6');
+    await page.close(); await page2.close();
+  }, 60_000);
+
+  it('a navigation during fill fails the current and remaining entries', async () => {
+    posted.length = 0;
+    const page = await open('greenhouse-form.html', '?norequired');
+    const r = await greenhouseFiller.fill(page, { missingRequired: [], manualReasons: [], entries: [
+      e('question_1', 'x'), e('question_7', 'Go', 'choice'), e('question_3', 'later', 'textarea'), e('identity:firstName', 'Jane'),
+    ] });
+    expect(r.filled).toEqual(['question_1']);
+    expect(r.failed).toEqual(['question_7', 'question_3', 'identity:firstName']);
+    expect(r.notFound).toEqual([]);
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 60_000);
+
   it('fillerFor maps kinds', () => {
     expect(fillerFor('greenhouse')).toBe(greenhouseFiller);
     expect(fillerFor('other')).toBeNull();

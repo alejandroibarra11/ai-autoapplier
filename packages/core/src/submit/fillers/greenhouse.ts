@@ -24,7 +24,14 @@ async function fillIdentity(page: Page, plan: FillPlan, e: FillEntry): Promise<b
       ? chooseCombobox(page, '#country', e.value, {
         allowContains: true,
         accept: (t) => norm(t.replace(/\s*\+\d+\s*$/, '')) === norm(e.value),
-        verify: (seen, chosen) => { const code = chosen.match(/\+\d+\s*$/)?.[0].trim(); return code ? seen.some((t) => t.includes(code)) : seen.slice(0, 2).some((t) => norm(t) === norm(chosen)); },
+        verify: (seen, chosen) => {
+          const code = chosen.match(/\+\d+\s*$/)?.[0].trim();
+          if (!code) return [seen.value, seen.single].some((t) => t && norm(t) === norm(chosen));
+          // The dial code shown must equal the target exactly (not a substring, +52 vs +520), and any exposed flag label must name the country.
+          const codeShown = seen.text.split(/\s+/).includes(code) || seen.single.trim() === code;
+          const flagLabels = seen.labels.filter((l) => /[a-z]{3}/i.test(l));
+          return codeShown && (flagLabels.length === 0 || flagLabels.some((l) => norm(l).includes(norm(e.value))));
+        },
       })
       : null;
     case 'identity:location': {
@@ -54,7 +61,11 @@ async function fillCustom(page: Page, e: FillEntry): Promise<boolean | null> {
     }
     case 'multiselect': {
       if (!e.value.split('; ').some((x) => x.trim())) return false;
-      for (const v of e.value.split('; ').map((x) => x.trim()).filter(Boolean)) if (!(await chooseCombobox(page, s, v))) return false;
+      for (const v of e.value.split('; ').map((x) => x.trim()).filter(Boolean)) {
+        // multi widgets clear the input and show one chip per chosen value
+        const ok = await chooseCombobox(page, s, v, { verify: (seen, chosen) => seen.chips.some((c) => norm(c) === norm(chosen)) });
+        if (!ok) return false;
+      }
       return true;
     }
     default: {
@@ -106,12 +117,23 @@ export const greenhouseFiller: AtsFiller = {
     const r: FilledReport = { filled: [], notFound: [], failed: [], requiredEmpty: [] };
     const unguard = await guardFill(page); // fill must never submit: block form posts for its whole duration
     try {
-      for (const e of plan.entries) {
+      const startUrl = page.url().split('#')[0];
+      let navigated = false;
+      for (let i = 0; i < plan.entries.length; i++) {
+        const e = plan.entries[i]!;
         let res: boolean | null;
         try { res = e.fieldId.startsWith('identity:') ? await fillIdentity(page, plan, e) : await fillCustom(page, e); } catch { res = false; }
+        await page.waitForTimeout(150); // let a triggered navigation (blocked by the guard) show up
+        const now = page.url();
+        if (now.split('#')[0] !== startUrl || now.startsWith('chrome-error')) {
+          // The page left the form: this entry and everything after it is failed, never notFound.
+          r.failed.push(...plan.entries.slice(i).map((x) => x.fieldId));
+          navigated = true;
+          break;
+        }
         (res === null ? r.notFound : res ? r.filled : r.failed).push(e.fieldId);
       }
-      r.requiredEmpty = await requiredEmpty(page);
+      r.requiredEmpty = navigated ? ['page navigated during fill'] : await requiredEmpty(page);
       return r;
     } finally {
       await unguard();

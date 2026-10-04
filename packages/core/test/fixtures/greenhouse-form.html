@@ -16,6 +16,8 @@
   <div class="cb"><label for="gender">Gender</label><input id="gender" role="combobox" autocomplete="off" data-options="Male|Female|Decline To Self Identify"></div>
   <div><label for="question_4">Native pick</label><select id="question_4" name="question_4"><option value=""></option><option>Yes</option><option>Maybe</option></select></div>
   <div id="question_5" data-chosen=""><button type="button" onclick="this.parentElement.dataset.chosen=this.textContent">Yes</button><button type="button" onclick="this.parentElement.dataset.chosen=this.textContent">No</button></div>
+  <div class="cb"><label for="question_6">Pick several</label><input id="question_6" role="combobox" autocomplete="off" data-multi="1" data-options="A|B|C"></div>
+  <div id="question_7"><button type="button" onclick="document.getElementById('app').submit()">Go</button></div>
   <button type="submit">Submit application</button>
 </form>
 <script>
@@ -41,7 +43,17 @@
       const el = document.createElement('div');
       el.setAttribute('role', 'option');
       el.textContent = o;
-      el.addEventListener('mousedown', (ev) => { ev.preventDefault(); input.value = o; close(); });
+      el.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        if (input.dataset.multi) {
+          const chip = document.createElement('span');
+          chip.className = 'select__multi-value__label';
+          chip.textContent = o;
+          input.parentElement.appendChild(chip);
+          input.value = '';
+        } else input.value = o;
+        close();
+      });
       box.appendChild(el);
     }
     if (input.getAttribute('aria-controls')) box.id = input.getAttribute('aria-controls');
