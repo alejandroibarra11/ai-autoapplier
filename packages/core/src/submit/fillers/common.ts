@@ -18,6 +18,7 @@ export const byName = (n: string) => `[name="${n.replace(/["\\]/g, '\\$&')}"]`;
 export async function runFill(
   page: Page, plan: FillPlan, order: FillEntry[], fillEntry: (e: FillEntry) => Promise<boolean | null>,
   extraRequired: (page: Page) => Promise<string[]> = async () => [],
+  afterLoop: (r: FilledReport) => Promise<void> = async () => {},
 ): Promise<FilledReport> {
   const r: FilledReport = { filled: [], notFound: [], failed: [], requiredEmpty: [] };
   const unguard = await guardFill(page);
@@ -37,6 +38,7 @@ export async function runFill(
       }
       (res === null ? r.notFound : res ? r.filled : r.failed).push(e.fieldId);
     }
+    if (!navigated) await afterLoop(r).catch(() => {});
     r.requiredEmpty = navigated ? ['page navigated during fill'] : [...(await requiredEmpty(page)), ...(await extraRequired(page).catch(() => []))];
     return r;
   } finally {
@@ -126,20 +128,35 @@ export async function selectNativeVerified(page: Page, selector: string, value: 
   return shown.length === 1 && norm(shown[0]!) === norm(value);
 }
 
-/** Alpha-3 codes that autocomplete widgets (Lever) append instead of a country name. Unknown codes never match. */
+/** Country identity: aliases and alpha-3 codes (autocomplete widgets such as Lever append "MEX") map to one canonical key. Unknown tokens only match themselves. */
 const ALPHA3: Record<string, string> = {
-  USA: 'United States', CAN: 'Canada', MEX: 'Mexico', GBR: 'United Kingdom', IRL: 'Ireland', DEU: 'Germany', FRA: 'France', ESP: 'Spain', PRT: 'Portugal',
-  ITA: 'Italy', NLD: 'Netherlands', BEL: 'Belgium', CHE: 'Switzerland', AUT: 'Austria', SWE: 'Sweden', NOR: 'Norway', DNK: 'Denmark', FIN: 'Finland',
-  POL: 'Poland', CZE: 'Czechia', ROU: 'Romania', UKR: 'Ukraine', BRA: 'Brazil', ARG: 'Argentina', CHL: 'Chile', COL: 'Colombia', PER: 'Peru',
-  URY: 'Uruguay', CRI: 'Costa Rica', PAN: 'Panama', GTM: 'Guatemala', ECU: 'Ecuador', IND: 'India', PAK: 'Pakistan', BGD: 'Bangladesh', PHL: 'Philippines',
-  IDN: 'Indonesia', VNM: 'Vietnam', THA: 'Thailand', SGP: 'Singapore', JPN: 'Japan', KOR: 'South Korea', CHN: 'China', AUS: 'Australia', NZL: 'New Zealand',
-  ZAF: 'South Africa', NGA: 'Nigeria', KEN: 'Kenya', EGY: 'Egypt', ISR: 'Israel', ARE: 'United Arab Emirates', TUR: 'Turkey', GRC: 'Greece',
+  USA: 'united states', CAN: 'canada', MEX: 'mexico', GBR: 'united kingdom', IRL: 'ireland', DEU: 'germany', FRA: 'france', ESP: 'spain', PRT: 'portugal',
+  ITA: 'italy', NLD: 'netherlands', BEL: 'belgium', CHE: 'switzerland', AUT: 'austria', SWE: 'sweden', NOR: 'norway', DNK: 'denmark', FIN: 'finland',
+  POL: 'poland', CZE: 'czechia', ROU: 'romania', UKR: 'ukraine', BRA: 'brazil', ARG: 'argentina', CHL: 'chile', COL: 'colombia', PER: 'peru',
+  URY: 'uruguay', CRI: 'costa rica', PAN: 'panama', GTM: 'guatemala', ECU: 'ecuador', IND: 'india', PAK: 'pakistan', BGD: 'bangladesh', PHL: 'philippines',
+  IDN: 'indonesia', VNM: 'vietnam', THA: 'thailand', SGP: 'singapore', JPN: 'japan', KOR: 'south korea', CHN: 'china', AUS: 'australia', NZL: 'new zealand',
+  ZAF: 'south africa', NGA: 'nigeria', KEN: 'kenya', EGY: 'egypt', ISR: 'israel', ARE: 'united arab emirates', TUR: 'turkey', GRC: 'greece',
+  RUS: 'russia', HUN: 'hungary', MYS: 'malaysia', SAU: 'saudi arabia', TWN: 'taiwan', HKG: 'hong kong',
 };
-/** True if the last comma segment of an autocomplete option names `country` (full name, or a known alpha-3 code). */
+const ALIASES: Record<string, string> = {
+  korea: 'south korea', 'republic of korea': 'south korea', 'czech republic': 'czechia', turkiye: 'turkey', uk: 'united kingdom', 'great britain': 'united kingdom',
+  usa: 'united states', us: 'united states', 'u.s.': 'united states', 'u.s.a.': 'united states', 'united states of america': 'united states',
+  'russian federation': 'russia', 'hong kong sar': 'hong kong',
+};
+const canon = (t: string): string => {
+  const n = norm(t);
+  if (/^[a-z]{3}$/.test(n) && ALPHA3[n.toUpperCase()]) return ALPHA3[n.toUpperCase()]!;
+  return ALIASES[n] ?? n;
+};
+/** True if the last comma segment of an option names `country` (name, alias, or known alpha-3 code). */
 export function lastSegmentIs(option: string, country: string): boolean {
-  const seg = lastSegment(option);
-  const want = norm(country);
-  if (norm(seg) === want) return true;
-  const mapped = ALPHA3[seg.toUpperCase()];
-  return /^[A-Za-z]{3}$/.test(seg) && !!mapped && norm(mapped) === want;
+  return canon(lastSegment(option)) === canon(country);
 }
+
+/** Link-field titles: exact (anchored) so "Which website did you hear about us on?" never matches. */
+export const URL_TITLES: Record<string, RegExp> = {
+  'identity:linkedin': /^linked ?in( profile)?( url| link)?$/i,
+  'identity:github': /^git ?hub( profile)?( url| link)?$/i,
+  'identity:portfolio': /^((personal )?(website|site)( ?(or|and|\/) ?portfolio)?|portfolio( ?(or|and|\/) ?(personal )?(website|site))?)( url| link)?$/i,
+};
+export const cleanTitle = (t: string) => t.replace(/\s+/g, ' ').replace(/[\s*\u2731:?]+$/, '').trim();

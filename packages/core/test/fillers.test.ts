@@ -367,7 +367,6 @@ describe('ashbyFiller', () => {
   it('never submits through typed newlines', async () => {
     posted.length = 0;
     const page = await open('ashby-form.html', '?norequired');
-    await page.evaluate(() => { document.getElementById('app')!.setAttribute('onsubmit', 'fetch("/apply",{method:"POST"});return false'); });
     const r = await ashbyFiller.fill(page, P([e('identity:fullName', 'Jane\nDoe'), e('aa11', 'a\nb', 'textarea')]));
     await page.waitForTimeout(500);
     expect(posted).toEqual([]);
@@ -379,10 +378,30 @@ describe('ashbyFiller', () => {
   it('fill runs under guardFill', async () => {
     posted.length = 0;
     const page = await open('ashby-form.html', '?norequired');
-    await page.evaluate(() => { document.querySelector('[name="_systemfield_name"]')!.addEventListener('input', () => { (document.getElementById('app') as HTMLFormElement).submit(); }); });
+    await page.evaluate(() => { document.querySelector('[name="_systemfield_name"]')!.addEventListener('input', () => { (window as unknown as { __send: (op: string) => void }).__send('ApiSubmitSingleApplicationFormAction'); }); });
     await ashbyFiller.fill(page, P([e('identity:fullName', 'Jane Doe')]));
     await page.waitForTimeout(500);
     expect(posted).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it('guardFill aborts a fetch-based submit (op query / operationName / path) but not autosave, upload or geo ops', async () => {
+    posted.length = 0;
+    const page = await open('ashby-form.html', '?norequired');
+    const send = (url: string, body: string) => page.evaluate(([u, b]) => fetch(u!, { method: 'POST', body: b }).then(() => 'ok', () => 'blocked'), [url, body]);
+    const un = await guardFill(page);
+    expect(await send('/api/non-user-graphql?op=ApiSubmitSingleApplicationFormAction', '{}')).toBe('blocked');
+    expect(await send('/api/non-user-graphql', '{"operationName": "ApiSubmitSingleApplicationFormAction"}')).toBe('blocked');
+    expect(await send('/api/applications/submit', 'x')).toBe('blocked');
+    expect(posted).toEqual([]);
+    for (const [u, b] of [['/api/non-user-graphql?op=ApiSetFormValue', '{"operationName":"ApiSetFormValue"}'], ['/api/non-user-graphql?op=ApiCreateFileUploadHandle', '{}'], ['/api/non-user-graphql?op=ApiAutocompleteGeoLocation', '{}']] as const) {
+      expect(await send(u, b)).toBe('ok');
+    }
+    expect(posted.length).toBe(3);
+    await un();
+    posted.length = 0;
+    expect(await send('/api/non-user-graphql?op=ApiSubmitSingleApplicationFormAction', '{}')).toBe('ok'); // unguarded again
+    expect(posted.length).toBe(1);
     await page.close();
   }, 60_000);
 
@@ -405,4 +424,103 @@ describe('ashbyFiller', () => {
     expect(posted.length).toBe(1);
     await page.close();
   }, 60_000);
+});
+
+describe('review fixes', () => {
+  const blank = async (html: string) => { const p = await browser.newPage(); await p.setContent(html); return p; };
+
+  it('requiredEmpty reports a radio group once via its first visible member; nameless radios individually', async () => {
+    const page = await blank(`<ul><li class="application-question"><div class="application-label">Pick A</div>
+      <input type="radio" name="a" required style="display:none"><input type="radio" name="a" required><input type="radio" name="a" required></li>
+      <li class="application-question"><div class="application-label">Pick B</div><input type="radio" name="b" required><input type="radio" name="b" required checked></li>
+      <li class="application-question"><div class="application-label">Loose one</div><input type="radio" required id="n1"></li>
+      <li class="application-question"><div class="application-label">Loose two</div><input type="radio" required id="n2"></li></ul>`);
+    const { requiredEmpty } = await import('../src/submit/dom');
+    expect(await requiredEmpty(page)).toEqual(['Pick A', 'Loose one', 'Loose two']);
+    await page.close();
+  });
+
+  it('lastSegmentIs: aliases and alpha-3 codes, failing closed', async () => {
+    const { lastSegmentIs } = await import('../src/submit/fillers/common');
+    for (const [opt, c] of [['Seoul, KOR', 'South Korea'], ['Seoul, KOR', 'Korea'], ['Prague, CZE', 'Czech Republic'], ['Prague, Czechia', 'Czech Republic'], ['Istanbul, TUR', 'Türkiye'],
+      ['Ankara, Turkey', 'Türkiye'], ['London, GBR', 'UK'], ['London, GBR', 'United Kingdom'], ['Austin, USA', 'US'], ['Austin, USA', 'United States'], ['Moscow, RUS', 'Russia'],
+      ['Budapest, HUN', 'Hungary'], ['Taipei, TWN', 'Taiwan'], ['Guadalajara, MEX', 'Mexico']] as const) expect(lastSegmentIs(opt, c), `${opt} / ${c}`).toBe(true);
+    for (const [opt, c] of [['Guadalajara, Spain', 'Mexico'], ['Lima, PER', 'Mexico'], ['X, ZZZ', 'Mexico'], ['Seoul, KOR', 'North Korea'], ['Austin, USA', 'Mexico'], ['Mexico City', 'Mexico City, Mexico']] as const) expect(lastSegmentIs(opt, c), `${opt} / ${c}`).toBe(false);
+  });
+
+  it('Lever resume: parse failure / oversize fails the resume; a late parser overwrite of a typed field fails that field', async () => {
+    for (const q of ['?uploadfail', '?oversize']) {
+      const page = await open('lever-form.html', q);
+      const r = await leverFiller.fill(page, P([e('identity:resume', cv, 'file'), e('identity:email', 'jane@example.com')]));
+      expect(r.failed, q).toEqual(['identity:resume']);
+      expect(r.filled).toEqual(['identity:email']);
+      await page.close();
+    }
+    const page = await open('lever-form.html', '?overwrite');
+    const r = await leverFiller.fill(page, P([e('identity:resume', cv, 'file'), e('identity:fullName', 'Jane Doe'), e('identity:email', 'jane@example.com'), e('identity:phone', '+52 1')]));
+    expect(r.failed).toEqual(['identity:fullName']);
+    expect(r.filled).toEqual(['identity:resume', 'identity:email', 'identity:phone']);
+    await page.close();
+  }, 60_000);
+
+  it('URL fields need an exact title: the "which website" question never gets the portfolio URL', async () => {
+    const page = await open('lever-form.html');
+    const r = await leverFiller.fill(page, P([e('identity:portfolio', 'https://x.dev', 'text', false)]));
+    expect(r.filled).toEqual(['identity:portfolio']);
+    expect(await page.inputValue('[name="urls[Personal Website or Portfolio]"]')).toBe('https://x.dev');
+    expect(await page.inputValue('[name="urls[Which website did you hear about us on?]"]')).toBe('');
+    const a = await open('ashby-form.html');
+    const r2 = await ashbyFiller.fill(a, P([e('identity:portfolio', 'https://x.dev', 'text', false)]));
+    expect(r2.filled).toEqual(['identity:portfolio']);
+    expect(await a.inputValue('[name="pf33"]')).toBe('https://x.dev');
+    expect(await a.inputValue('[name="dd44"]')).toBe('');
+    await page.close(); await a.close();
+  }, 60_000);
+
+  it('Ashby submit (unguarded) sends exactly one submit POST', async () => {
+    posted.length = 0;
+    const page = await open('ashby-form.html');
+    await ashbyFiller.fill(page, ashbyPlan);
+    expect(posted).toEqual([]);
+    expect((await ashbyFiller.submit(page, 10_000)).kind).toBe('confirmed');
+    expect(posted.length).toBe(1);
+    expect(posted[0]).toContain('ApiSubmitSingleApplicationFormAction');
+    await page.close();
+  }, 60_000);
+});
+
+describe('Lever system inputs are identity (no duplicate custom entries)', () => {
+  it('classifies location/selectedLocation/org/urls[]/comments as identity', async () => {
+    const { normalizeFormFields } = await import('../src/apply/form-fields');
+    const f = (name: string, label: string, tag: 'input' | 'textarea' = 'input') => ({ name, label, tag, inputType: tag === 'input' ? 'text' : undefined, required: false });
+    const qs = normalizeFormFields([f('location', 'Current location'), f('org', 'Current company'), f('urls[Github]', 'Github URL'), f('urls[Other]', 'Other'), f('comments', 'Additional information', 'textarea'), f('cards[x][field0]', 'Tell us', 'textarea')]);
+    expect(qs.map((q) => [q.id, q.type])).toEqual([['location', 'identity'], ['org', 'identity'], ['urls[Github]', 'identity'], ['urls[Other]', 'identity'], ['comments', 'identity'], ['cards[x][field0]', 'textarea']]);
+  });
+
+  it('a plan over the real Lever snapshot fills with no failures and no duplicate system entries', async () => {
+    const { openBrowser, makePageOpener } = await import('../src/browser');
+    const { normalizeFormFields } = await import('../src/apply/form-fields');
+    const { buildFillPlan } = await import('../src/submit/plan');
+    const { parseAnswers } = await import('../src/answers');
+    const { parseProfile } = await import('../src/profile');
+    const root = join(__dirname, '..', '..', '..', 'profile');
+    const answers = { ...parseAnswers(readFileSync(join(root, 'answers.example.yaml'), 'utf8')), location: '' }; // the snapshot has no scripts, so no location autocomplete
+    const profile = parseProfile(readFileSync(join(root, 'profile.example.yaml'), 'utf8'));
+    const session = await openBrowser({ headless: true, userDataDir: mkdtempSync(join(tmpdir(), 'aa-lever-ud-')) });
+    try {
+      const file = join(__dirname, 'fixtures', 'lever-application.html');
+      const questions = normalizeFormFields(await makePageOpener(session, 20_000).readForm(`file://${file}`));
+      const draft = { cvPdfPath: null, coverLetter: 'Dear team', answers: questions.filter((q) => q.type !== 'identity' && q.type !== 'file').map((q) => ({ questionId: q.id, label: q.label, source: 'generated' as const, answer: q.options?.[0] ?? 'Example answer.' })) };
+      const plan = buildFillPlan({ questions, draft, answers, profile });
+      const ids = plan.entries.map((x) => x.fieldId);
+      for (const dup of ['location', 'org', 'comments', 'urls[LinkedIn Profile]', 'urls[Github]']) expect(ids).not.toContain(dup);
+      const page = await browser.newPage();
+      await page.route('https://jobs.test/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: readFileSync(file, 'utf8') }));
+      await page.goto('https://jobs.test/toptal/1/apply');
+      const r = await leverFiller.fill(page, plan);
+      expect(r.failed).toEqual([]);
+      expect(r.notFound).not.toContain('cards[fe90817b-8fda-4146-9f56-a58f51defa04][field0]');
+      await page.close();
+    } finally { await session.close(); }
+  }, 90_000);
 });

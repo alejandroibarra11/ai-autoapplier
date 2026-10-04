@@ -2,14 +2,11 @@
 import type { Page } from 'playwright';
 import type { AtsFiller, FillEntry, FillPlan, FilledReport, SubmitOutcome } from '../types';
 import { fillText, oneLine, setFile } from '../dom';
-import { byName, checkByLabel, lastSegmentIs, norm, runFill, runSubmit, selectNativeVerified } from './common';
+import { URL_TITLES, byName, checkByLabel, cleanTitle, lastSegmentIs, norm, runFill, runSubmit, selectNativeVerified } from './common';
 
 const IDENTITY_TEXT: Record<string, string> = {
   'identity:fullName': 'input[name="name"]', 'identity:email': 'input[name="email"]', 'identity:phone': 'input[name="phone"]',
   'identity:currentCompany': 'input[name="org"]',
-};
-const URL_KEYS: Record<string, RegExp> = {
-  'identity:linkedin': /linkedin/i, 'identity:github': /github/i, 'identity:portfolio': /portfolio|website|personal|other/i,
 };
 const SUBMIT = '#btn-submit';
 const ERROR_TEXT = /this field is required|is required|there was an error|please (fix|correct|complete)|something went wrong|spam/i;
@@ -58,15 +55,23 @@ async function fillLocation(page: Page, plan: FillPlan, e: FillEntry): Promise<b
   }
 }
 
-async function fillIdentity(page: Page, plan: FillPlan, e: FillEntry): Promise<boolean | null> {
+/** Text identity inputs written during this fill: re-read at the end to catch a late resume-parser overwrite. */
+type Written = { fieldId: string; selector: string; want: string };
+
+async function fillIdentity(page: Page, plan: FillPlan, e: FillEntry, written: Written[]): Promise<boolean | null> {
   if (!e.value.trim()) return null;
   const text = IDENTITY_TEXT[e.fieldId];
-  if (text) return (await page.locator(text).count()) ? fillText(page, text, e.value) : null;
-  const urlKey = URL_KEYS[e.fieldId];
-  if (urlKey) {
+  const typed = async (sel: string): Promise<boolean> => {
+    const ok = await fillText(page, sel, e.value);
+    if (ok) written.push({ fieldId: e.fieldId, selector: sel, want: await page.locator(sel).first().inputValue() });
+    return ok;
+  };
+  if (text) return (await page.locator(text).count()) ? typed(text) : null;
+  const urlTitle = URL_TITLES[e.fieldId];
+  if (urlTitle) {
     const names = await page.locator('input[name^="urls["]').evaluateAll((els) => els.map((el) => el.getAttribute('name') ?? ''));
-    const name = names.find((n) => urlKey.test(n));
-    return name ? fillText(page, `input${byName(name)}`, e.value) : null;
+    const name = names.find((n) => urlTitle.test(cleanTitle(n.replace(/^urls\[/, '').replace(/\]$/, ''))));
+    return name ? typed(`input${byName(name)}`) : null;
   }
   switch (e.fieldId) {
     case 'identity:location': return fillLocation(page, plan, e);
@@ -76,19 +81,23 @@ async function fillIdentity(page: Page, plan: FillPlan, e: FillEntry): Promise<b
   }
 }
 
-/** Lever parses an uploaded resume and may autofill other fields: wait for it to finish (callers upload first). */
+/**
+ * Lever parses an uploaded resume and may autofill other fields (callers upload first). The upload only counts once the page reports
+ * success; a parse failure, an oversize error or no verdict within 20 s fails the resume.
+ */
 async function uploadResume(page: Page, path: string): Promise<boolean> {
-  const ok = await setFile(page, 'input[name="resume"]', path);
-  await page.locator('.resume-upload-working').first().waitFor({ state: 'hidden', timeout: 20_000 }).catch(() => {});
-  return ok;
+  if (!(await setFile(page, 'input[name="resume"]', path))) return false;
+  const shown = async (sel: string) => page.locator(sel).first().isVisible().catch(() => false);
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    if ((await shown('.resume-upload-failure')) || (await shown('.resume-upload-oversize'))) return false;
+    if (await shown('.resume-upload-success')) return true;
+    await page.waitForTimeout(250);
+  }
+  return false;
 }
 
-async function fillCustom(page: Page, plan: FillPlan, e: FillEntry): Promise<boolean | null> {
-  if (e.fieldId === 'location') {
-    // a duplicate answer must not wipe a good structured selection made by identity:location
-    if ((await page.locator('input[name="selectedLocation"]').first().inputValue().catch(() => '')) !== '') return false;
-    return fillLocation(page, plan, e);
-  } // scraped as a custom question, but it is the structured autocomplete
+async function fillCustom(page: Page, e: FillEntry): Promise<boolean | null> {
   const s = byName(e.fieldId);
   const first = page.locator(s).first();
   if (!(await page.locator(s).count())) return null;
@@ -118,7 +127,15 @@ export const leverFiller: AtsFiller = {
   async fill(page: Page, plan: FillPlan): Promise<FilledReport> {
     // The resume goes first: Lever's resume parser may overwrite name/email/phone afterwards.
     const order = [...plan.entries.filter((x) => x.fieldId === 'identity:resume'), ...plan.entries.filter((x) => x.fieldId !== 'identity:resume')];
-    return runFill(page, plan, order, (e) => (e.fieldId.startsWith('identity:') ? fillIdentity(page, plan, e) : fillCustom(page, plan, e)));
+    const written: Written[] = [];
+    return runFill(page, plan, order, (e) => (e.fieldId.startsWith('identity:') ? fillIdentity(page, plan, e, written) : fillCustom(page, e)), undefined, async (r) => {
+      await page.waitForTimeout(500); // let a late parser result land
+      for (const w of written) {
+        if (!r.filled.includes(w.fieldId)) continue;
+        const now = await page.locator(w.selector).first().inputValue().catch(() => null);
+        if (now !== w.want) { r.filled.splice(r.filled.indexOf(w.fieldId), 1); r.failed.push(w.fieldId); }
+      }
+    });
   },
 
   async submit(page: Page, timeoutMs: number): Promise<SubmitOutcome> {

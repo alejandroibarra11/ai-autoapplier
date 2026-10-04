@@ -3,7 +3,7 @@
 <body class="application">
 <form id="application-form" enctype="multipart/form-data" method="POST" action="/apply">
 <ul>
-  <li class="application-question resume"><label><div class="application-label">Resume/CV <span class="required">✱</span></div><div class="application-field"><a href="#" class="postings-btn"><span class="filename"></span><span class="default-label">ATTACH RESUME/CV</span><input class="application-file-input invisible-resume-upload" id="resume-upload-input" name="resume" tabindex="-1" type="file"></a><span class="resume-upload-working" style="display:none">Analyzing resume...</span><span class="resume-upload-success" style="display:none">Success!</span></div></label></li>
+  <li class="application-question resume"><label><div class="application-label">Resume/CV <span class="required">✱</span></div><div class="application-field"><a href="#" class="postings-btn"><span class="filename"></span><span class="default-label">ATTACH RESUME/CV</span><input class="application-file-input invisible-resume-upload" id="resume-upload-input" name="resume" tabindex="-1" type="file"></a><span class="resume-upload-working" style="display:none">Analyzing resume...</span><span class="resume-upload-success" style="display:none">Success!</span><span class="resume-upload-failure" style="display:none">Couldn't auto-read resume.</span><span class="resume-upload-oversize" style="display:none"><p class="error-message">File exceeds the maximum upload size</p></span></div></label></li>
   <li class="application-question"><label><div class="application-label">Full name<span class="required">✱</span></div><div class="application-field"><input type="text" name="name" required></div></label></li>
   <li class="application-question"><label><div class="application-label">Email<span class="required">✱</span></div><div class="application-field"><input name="email" type="email" required></div></label></li>
   <li class="application-question"><label><div class="application-label">Phone </div><div class="application-field"><input type="text" name="phone"></div></label></li>
@@ -11,6 +11,7 @@
   <li class="application-question"><label><div class="application-label">Current company </div><div class="application-field"><input type="text" name="org"></div></label></li>
   <li class="application-question"><label><div class="application-label">LinkedIn Profile URL</div><div class="application-field"><input type="text" name="urls[LinkedIn Profile]"></div></label></li>
   <li class="application-question"><label><div class="application-label">Personal Website or Portfolio URL</div><div class="application-field"><input type="text" name="urls[Personal Website or Portfolio]"></div></label></li>
+  <li class="application-question"><label><div class="application-label">Which website did you hear about us on?</div><div class="application-field"><input type="text" name="urls[Which website did you hear about us on?]"></div></label></li>
   <li class="application-question"><label><div class="application-label">Github URL</div><div class="application-field"><input type="text" name="urls[Github]"></div></label></li>
   <li class="application-question"><label><div class="application-label">Additional information</div><div class="application-field"><textarea name="comments"></textarea></div></label></li>
   <li class="application-question custom-question"><div><div class="application-label"><div class="text">Tell us about yourself<span class="required">✱</span></div></div><div class="application-field"><textarea class="card-field-input" name="cards[c1][field0]" required="required"></textarea></div></div></li>
@@ -42,7 +43,14 @@
     document.querySelector('.filename').textContent = rl.files[0].name;
     const w = document.querySelector('.resume-upload-working'); w.style.display = 'inline';
     // like Lever, the parser finishes later and may autofill the name
-    setTimeout(() => { w.style.display = 'none'; const n = document.querySelector('[name=name]'); if (!n.value) n.value = 'Parsed Name'; }, 400);
+    setTimeout(() => {
+      w.style.display = 'none';
+      const show = (c) => { document.querySelector('.' + c).style.display = 'inline'; };
+      if (q.includes('uploadfail')) show('resume-upload-failure'); else if (q.includes('oversize')) show('resume-upload-oversize'); else show('resume-upload-success');
+      const n = document.querySelector('[name=name]'); if (!n.value) n.value = 'Parsed Name';
+    }, 400);
+    // a slow parser result that overwrites what was typed in the meantime
+    if (q.includes('overwrite')) setTimeout(() => { document.querySelector('[name=name]').value = 'Parsed Name'; }, 700);
   });
   const li = document.getElementById('location-input');
   const box = document.querySelector('.dropdown-results');

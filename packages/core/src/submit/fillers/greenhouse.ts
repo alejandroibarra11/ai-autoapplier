@@ -1,8 +1,8 @@
 /// <reference lib="dom" />
 import type { Page } from 'playwright';
 import type { AtsFiller, FillEntry, FillPlan, FilledReport, SubmitOutcome } from '../types';
-import { chooseCombobox, chooseNative, clickChoiceButton, fillText, guardFill, requiredEmpty, setFile } from '../dom';
-import { detectCaptchaChallenge, detectConfirmation } from '../detect';
+import { chooseCombobox, chooseNative, clickChoiceButton, fillText, setFile } from '../dom';
+import { runFill, runSubmit } from './common';
 
 const IDENTITY_TEXT: Record<string, string> = {
   'identity:firstName': '#first_name', 'identity:lastName': '#last_name', 'identity:email': '#email', 'identity:phone': '#phone',
@@ -76,85 +76,15 @@ async function fillCustom(page: Page, e: FillEntry): Promise<boolean | null> {
   }
 }
 
-async function bodyText(page: Page): Promise<string> {
-  try { return await page.evaluate(() => document.body?.innerText ?? ''); } catch { return ''; }
-}
-
-async function formPresent(page: Page): Promise<boolean> {
-  try { return await page.locator(SUBMIT).first().isVisible(); } catch { return false; }
-}
-
-const ERROR_SEL = '[role="alert"], .error, [class*="error"]';
-
-/** Visible error texts currently on the page. */
-async function errorTexts(page: Page): Promise<string[]> {
-  const out: string[] = [];
-  try {
-    for (const l of await page.locator(ERROR_SEL).all()) {
-      if (!(await l.isVisible())) continue;
-      const t = (await l.innerText()).trim();
-      if (t) out.push(t.slice(0, 300));
-    }
-  } catch { /* page navigating */ }
-  return out;
-}
-
-async function newError(page: Page, before: { texts: Set<string>; bodyHadError: boolean }): Promise<string | null> {
-  const fresh = (await errorTexts(page)).find((t) => !before.texts.has(t));
-  if (fresh) return fresh;
-  if (!before.bodyHadError) {
-    const m = (await bodyText(page)).match(ERROR_TEXT);
-    if (m) return m[0];
-  }
-  return null;
-}
-
 export const greenhouseFiller: AtsFiller = {
   kind: 'greenhouse',
   formUrl: (t) => t.url,
 
   async fill(page: Page, plan: FillPlan): Promise<FilledReport> {
-    const r: FilledReport = { filled: [], notFound: [], failed: [], requiredEmpty: [] };
-    const unguard = await guardFill(page); // fill must never submit: block form posts for its whole duration
-    try {
-      const startUrl = page.url().split('#')[0];
-      let navigated = false;
-      for (let i = 0; i < plan.entries.length; i++) {
-        const e = plan.entries[i]!;
-        let res: boolean | null;
-        try { res = e.fieldId.startsWith('identity:') ? await fillIdentity(page, plan, e) : await fillCustom(page, e); } catch { res = false; }
-        await page.waitForTimeout(150); // let a triggered navigation (blocked by the guard) show up
-        const now = page.url();
-        if (now.split('#')[0] !== startUrl || now.startsWith('chrome-error')) {
-          // The page left the form: this entry and everything after it is failed, never notFound.
-          r.failed.push(...plan.entries.slice(i).map((x) => x.fieldId));
-          navigated = true;
-          break;
-        }
-        (res === null ? r.notFound : res ? r.filled : r.failed).push(e.fieldId);
-      }
-      r.requiredEmpty = navigated ? ['page navigated during fill'] : await requiredEmpty(page);
-      return r;
-    } finally {
-      await unguard();
-    }
+    return runFill(page, plan, plan.entries, (e) => (e.fieldId.startsWith('identity:') ? fillIdentity(page, plan, e) : fillCustom(page, e)));
   },
 
   async submit(page: Page, timeoutMs: number): Promise<SubmitOutcome> {
-    const preUrl = page.url();
-    // Errors already on the page before the click (error boundaries, inline hints) are not submit results.
-    const before = { texts: new Set(await errorTexts(page)), bodyHadError: ERROR_TEXT.test(await bodyText(page)) };
-    await page.locator(SUBMIT).first().click({ timeout: 10_000 });
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const present = await formPresent(page);
-      const err = present ? await newError(page, before) : null;
-      if (err) return { kind: 'error', evidence: err };
-      if (await detectCaptchaChallenge(page)) return { kind: 'captcha', evidence: 'captcha challenge visible' };
-      const text = await bodyText(page);
-      if (detectConfirmation({ preUrl, url: page.url(), text, formPresent: present })) return { kind: 'confirmed', evidence: `${page.url()} ${text.slice(0, 120).replace(/\s+/g, ' ')}` };
-      await page.waitForTimeout(300);
-    }
-    return { kind: 'unknown', evidence: `no confirmation within ${timeoutMs}ms at ${page.url()}` };
+    return runSubmit(page, timeoutMs, { submitSelector: SUBMIT, errorText: ERROR_TEXT, errorSelector: '[role="alert"], .error, [class*="error"]' });
   },
 };

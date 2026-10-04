@@ -134,6 +134,14 @@ export async function setFile(page: Page, selector: string, path: string): Promi
  * Defense in depth while filling: abort any non-GET navigation and any non-GET request to the form action or the page URL.
  * Returns an `unguard`. Never installed around submit.
  */
+/** SPA submits are plain fetches (e.g. Ashby GraphQL `op=ApiSubmit...`): match on path, `op` param or the body's operationName. Autosave/upload/geo ops do not match. */
+function looksLikeSubmit(url: string, body: string | null): boolean {
+  let path = url;
+  let op = '';
+  try { const u = new URL(url); path = u.pathname; op = u.searchParams.get('op') ?? ''; } catch { /* keep raw */ }
+  return /submit/i.test(path) || /submit/i.test(op) || /"operationName"\s*:\s*"[^"]*submit/i.test(body ?? '');
+}
+
 export async function guardFill(page: Page): Promise<() => Promise<void>> {
   const strip = (u: string) => u.split(/[?#]/)[0]!;
   const targets = new Set<string>([strip(page.url())]);
@@ -142,7 +150,8 @@ export async function guardFill(page: Page): Promise<() => Promise<void>> {
   } catch { /* page not ready: page URL only */ }
   const handler = async (route: Route) => {
     const req = route.request();
-    if (req.method() !== 'GET' && (req.isNavigationRequest() || targets.has(strip(req.url())))) return route.abort('blockedbyclient');
+    if (req.method() === 'GET') return route.fallback();
+    if (req.isNavigationRequest() || targets.has(strip(req.url())) || looksLikeSubmit(req.url(), req.postData())) return route.abort('blockedbyclient');
     return route.fallback();
   };
   await page.route('**/*', handler);
@@ -170,10 +179,12 @@ const REQUIRED_EMPTY_JS = `(() => {
       if (!isFile && (style.visibility === 'hidden' || style.display === 'none' || (box.width === 0 && box.height === 0))) continue;
       let empty;
       if (type === 'radio') {
-        // a radio group is answered when any member is checked; report the group once, by its question text
-        const grp = Array.from(document.querySelectorAll('input[type="radio"]')).filter((r) => r.name === e.name);
-        if (!e.name || grp.some((r) => r.checked) || grp.indexOf(e) > 0) continue;
-        out.push(clean(e.closest('li.application-question, fieldset')?.querySelector('.application-label, legend, label')?.textContent) || e.name);
+        // a group is answered when any member is checked; report it once, via its first visible member. Nameless radios stand alone.
+        const vis = (r) => { const rb = r.getBoundingClientRect(); const rs = getComputedStyle(r); return rs.visibility !== 'hidden' && rs.display !== 'none' && (rb.width > 0 || rb.height > 0); };
+        const grp = e.name ? Array.from(document.querySelectorAll('input[type="radio"]')).filter((r) => r.name === e.name) : [e];
+        if (grp.some((r) => r.checked)) continue;
+        if (e.name && grp.filter(vis)[0] !== e) continue;
+        out.push(clean(e.closest('li.application-question, fieldset')?.querySelector('.application-label, legend, label')?.textContent) || e.name || e.id);
         continue;
       } else if (type === 'checkbox') empty = !e.checked;
       else if (isFile) empty = (e.files?.length ?? 0) === 0;

@@ -2,24 +2,25 @@
 import type { Locator, Page } from 'playwright';
 import type { AtsFiller, FillEntry, FillPlan, FilledReport, SubmitOutcome } from '../types';
 import { chooseCombobox, fillText, oneLine, setFile } from '../dom';
-import { byName, checkByLabel, lastSegmentIs, norm, runFill, runSubmit, selectNativeVerified } from './common';
+import { URL_TITLES, byName, checkByLabel, cleanTitle, lastSegmentIs, norm, runFill, runSubmit, selectNativeVerified } from './common';
 
 const SUBMIT = 'button.ashby-application-form-submit-button';
 const ERROR_TEXT = /missing entry for required|form needs corrections|is required|there was an error|please (fix|correct|complete)|flagged as (possible )?spam|something went wrong/i;
 const ERROR_SEL = '[role="alert"], [class*="error" i]';
 const T = 5000;
 
-const LABEL_KEYS: Record<string, RegExp> = {
-  'identity:linkedin': /linkedin/i, 'identity:github': /github/i, 'identity:portfolio': /portfolio|website/i,
-};
-
-/** The text input of the field entry whose title matches; returns its name-based selector. */
+/** The text input of the field entry whose (whole) title matches; returns its name-based selector. */
 async function inputByTitle(page: Page, re: RegExp): Promise<string | null> {
-  const entry = page.locator('[data-field-path]').filter({ has: page.locator('label', { hasText: re }) });
-  const input = entry.locator('input[type="text"], input:not([type])').first();
-  if (!(await input.count())) return null;
-  const name = await input.getAttribute('name');
-  return name ? `input${byName(name)}` : null;
+  const entries = page.locator('[data-field-path]');
+  const titles = await entries.evaluateAll((els) => els.map((el) => el.querySelector('label')?.textContent ?? ''));
+  for (let i = 0; i < titles.length; i++) {
+    if (!re.test(cleanTitle(titles[i]!))) continue;
+    const input = entries.nth(i).locator('input[type="text"], input:not([type])').first();
+    if (!(await input.count())) continue;
+    const name = await input.getAttribute('name');
+    if (name) return `input${byName(name)}`;
+  }
+  return null;
 }
 
 async function fillLocation(page: Page, plan: FillPlan, e: FillEntry): Promise<boolean | null> {
@@ -46,7 +47,7 @@ async function fillIdentity(page: Page, plan: FillPlan, e: FillEntry): Promise<b
     case 'identity:location': return fillLocation(page, plan, e);
     case 'identity:resume': return (await page.locator('input#_systemfield_resume').count()) ? setFile(page, 'input#_systemfield_resume', e.value) : null;
     default: {
-      const key = LABEL_KEYS[e.fieldId];
+      const key = URL_TITLES[e.fieldId];
       const sel = key ? await inputByTitle(page, key) : null;
       return sel ? fillText(page, sel, e.value) : null; // no first/last name, country, company or cover letter fields on Ashby
     }
