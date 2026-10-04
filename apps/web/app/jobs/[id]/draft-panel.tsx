@@ -54,6 +54,7 @@ export function DraftPanel({ job, draft }: { job: JobRow; draft: DraftRow | unde
       {editable && <form action={regenerateDraft.bind(null, job.id)}><button>🔁 Regenerate</button></form>}
       {editable && <form action={skipJob.bind(null, job.id)}><button>⏭ Skip</button></form>}
       {job.status === 'ready_to_apply' && <form action={markApplied.bind(null, job.id)}><button>📨 Mark applied</button></form>}
+      {job.status === 'ready_to_apply' && <form action={skipJob.bind(null, job.id)}><button>⏭ Skip</button></form>}
     </div>
   );
 }

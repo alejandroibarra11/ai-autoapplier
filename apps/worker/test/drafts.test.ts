@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { openDb, insertJobs, listJobsByStatus, setStatus, insertDraft, getJob, latestDraft, type DraftInput } from '@autoapplier/core';
 import { formatDraftCard, formatDraftFailure, formatReadyMessages, handleDraftAction, notifyDraftFailures, notifyDrafts, parseDraftCallback, sendReady } from '../src/drafts';
 
@@ -81,6 +81,16 @@ describe('handleDraftAction', () => {
     expect(handleDraftAction(db, '42', 7, `sd:${id}`)).toEqual({ ok: false, text: 'Not allowed' });
     expect(handleDraftAction(db, '42', 42, `sd:${id}`).ok).toBe(true);
     expect(getJob(db, id)!.status).toBe('skipped');
+  });
+  it('skip also works from ready_to_apply, not after applied', () => {
+    const { db, id } = setup();
+    handleDraftAction(db, '42', 42, `ap:${id}`);
+    expect(handleDraftAction(db, '42', 42, `sd:${id}`)).toMatchObject({ ok: true, text: '⏭ Skipped' });
+    expect(getJob(db, id)!.status).toBe('skipped');
+    const other = setup();
+    handleDraftAction(other.db, '42', 42, `ap:${other.id}`);
+    handleDraftAction(other.db, '42', 42, `ma:${other.id}`);
+    expect(handleDraftAction(other.db, '42', 42, `sd:${other.id}`)).toEqual({ ok: false, text: 'Already applied' });
   });
 });
 
@@ -169,6 +179,26 @@ describe('sendReady resilience', () => {
     await sendReady(sender, '42', getJob(db, id)!, latestDraft(db, id)!);
     expect(sent.filter((s) => s.markup).length).toBe(1);
     expect(sent[sent.length - 1]!.text).toContain('Mark applied');
+  });
+});
+
+describe('sendReady buttons and CV', () => {
+  it('offers Skip next to Mark applied', async () => {
+    const { db, id } = setup();
+    const markups: unknown[] = [];
+    const sender = { sendMessage: async (_c: string, _t: string, o?: { reply_markup?: unknown }) => { if (o?.reply_markup) markups.push(o.reply_markup); }, sendDocument: async () => {} };
+    await sendReady(sender, '42', getJob(db, id)!, latestDraft(db, id)!);
+    const json = JSON.stringify(markups);
+    expect(json).toContain(`ma:${id}`);
+    expect(json).toContain(`sd:${id}`);
+  });
+  it('logs a failed CV document instead of swallowing it', async () => {
+    const { db, id } = setup();
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const sender = { sendMessage: async () => {}, sendDocument: async () => { throw new Error('file too big'); } };
+    await sendReady(sender, '42', getJob(db, id)!, latestDraft(db, id)!);
+    expect(err).toHaveBeenCalledWith(expect.stringContaining(`CV send failed for job #${id}`), 'file too big');
+    err.mockRestore();
   });
 });
 

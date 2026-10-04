@@ -107,11 +107,12 @@ export function handleDraftAction(
     setStatus(db, job.id, 'applied', 'telegram', {}, now);
     return { ok: true, text: '📨 Marked applied', jobId: job.id, next: 'applied' };
   }
-  if (job.status !== 'draft_ready') return { ok: false, text: `Already ${job.status}` };
   if (p.action === 'skip') {
-    setStatus(db, job.id, 'skipped', 'telegram draft', {}, now);
+    if (job.status !== 'draft_ready' && job.status !== 'ready_to_apply') return { ok: false, text: `Already ${job.status}` };
+    setStatus(db, job.id, 'skipped', `telegram ${job.status === 'draft_ready' ? 'draft' : 'ready'}`, {}, now);
     return { ok: true, text: '⏭ Skipped', jobId: job.id };
   }
+  if (job.status !== 'draft_ready') return { ok: false, text: `Already ${job.status}` };
   const draft = latestDraft(db, job.id);
   if (!draft) return { ok: false, text: 'No draft' };
   if (draft.flags.some(isBlockingFlag)) return { ok: false, text: '⚠️ Draft has warnings — review it in the dashboard' };
@@ -144,7 +145,7 @@ export async function notifyDrafts(sender: DraftSender, chatId: string, db: Db, 
 
 export async function sendReady(sender: DraftSender, chatId: string, job: JobRow, draft: DraftRow): Promise<void> {
   const msgs = formatReadyMessages(job, draft);
-  const button = () => ({ parse_mode: 'HTML' as const, link_preview_options: { is_disabled: true }, reply_markup: new InlineKeyboard().text('📨 Mark applied', `ma:${job.id}`) });
+  const button = () => ({ parse_mode: 'HTML' as const, link_preview_options: { is_disabled: true }, reply_markup: new InlineKeyboard().text('📨 Mark applied', `ma:${job.id}`).text('⏭ Skip', `sd:${job.id}`) });
   const plain = { parse_mode: 'HTML' as const, link_preview_options: { is_disabled: true } };
   let lastDelivered = -1;
   for (const [i, m] of msgs.entries()) {
@@ -160,7 +161,10 @@ export async function sendReady(sender: DraftSender, chatId: string, job: JobRow
     await sender.sendMessage(chatId, '📨 Mark applied when done', button()).catch((e) =>
       console.error(`[telegram] mark-applied prompt failed for job #${job.id}:`, e instanceof Error ? e.message : e));
   }
-  if (draft.cvPdfPath) await sender.sendDocument(chatId, draft.cvPdfPath, `CV — ${job.company}`).catch(() => {});
+  if (draft.cvPdfPath) {
+    await sender.sendDocument(chatId, draft.cvPdfPath, `CV — ${job.company}`).catch((e) =>
+      console.error(`[telegram] CV send failed for job #${job.id}:`, e instanceof Error ? e.message : e));
+  }
 }
 
 export function formatDraftFailure(job: JobRow, reason: string): string {
