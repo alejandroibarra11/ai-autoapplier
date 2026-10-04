@@ -2,12 +2,14 @@ import { join } from 'node:path';
 import cron from 'node-cron';
 import { InputFile } from 'grammy';
 import {
-  createProvider, extractQuestions, getJob, hasDraftWork, latestDraft, makePageOpener, openBrowser, renderPdf as renderPdfWith,
-  resolveApplyTarget, runDrafting, type BrowserSession,
+  createProvider, extractQuestions, hasDraftWork, listJobsForFilling, makePageOpener, openBrowser, renderPdf as renderPdfWith,
+  resetStaleFillSubmit, resolveApplyTarget, runDrafting, runFill, runSubmit, type PageFactory,
 } from '@autoapplier/core';
 import { createBrowserHolder, createLogThrottle } from './browser-holder';
 import { createDraftLoop, createFailureWatch } from './draft-loop';
-import { notifyDraftFailures, notifyDrafts, sendReady, type DraftSender } from './drafts';
+import { notifyDraftFailures, notifyDrafts } from './drafts';
+import { createMutex } from './mutex';
+import { createSubmitTaps, notifySubmissions, reportSubmitResult, sendReadyUnlessAutoFill, type SubmissionSender } from './submissions';
 import { bootstrap } from './bootstrap';
 import { createDailyGate, logSummary, runPipelineOnce } from './pipeline';
 import { createBot, type MessageSender } from './telegram';
@@ -17,14 +19,25 @@ const app = bootstrap();
 const { telegramToken, chatId } = app.env;
 if (!telegramToken) throw new Error('TELEGRAM_BOT_TOKEN missing in .env');
 
-const bot = createBot(telegramToken, chatId ?? '', app.db, async (jobId) => {
-  const job = getJob(app.db, jobId);
-  const d = job && latestDraft(app.db, jobId);
-  if (job && d && chatId) await sendReady(draftSender, chatId, job, d);
+// One browser action at a time: the draft/fill loop and 🚀 Submit taps all run under this lock.
+const browserLock = createMutex();
+const shotsDir = join(app.root, 'data/screenshots');
+const holder = createBrowserHolder(() => openBrowser({ headless: app.cfg.browser.headless, userDataDir: join(app.root, 'data/browser') }));
+const pages: PageFactory = { newPage: async () => (await holder.get()).context.newPage() };
+
+// The ONLY production path to runSubmit in the worker: the user's chat-gated 🚀 Submit tap.
+const submitTap = createSubmitTaps(app.db, chatId ?? '', async (jobId) => {
+  const r = await browserLock(() => runSubmit({ db: app.db, cfg: app.cfg, profile: app.profile, answers: app.answers, shotsDir, pages }, jobId));
+  console.log(`[submit] job #${jobId}: ${r.status}${'reason' in r && r.reason ? ` (${r.reason})` : ''}`);
+  if (chatId) await reportSubmitResult(draftSender, chatId, app.db, jobId, r).catch((e) => console.error(`[submit] result message failed for job #${jobId}`, e));
 });
-const draftSender: DraftSender = {
+const bot = createBot(telegramToken, chatId ?? '', app.db, async (jobId) => {
+  if (chatId) await sendReadyUnlessAutoFill(draftSender, chatId, app.db, jobId);
+}, { submitTap });
+const draftSender: SubmissionSender = {
   sendMessage: (c, t, o) => bot.api.sendMessage(c, t, o as never),
-  sendDocument: (c, p, caption) => bot.api.sendDocument(c, new InputFile(p), { caption }),
+  sendDocument: (c, p, caption, o) => bot.api.sendDocument(c, new InputFile(p), { caption, ...(o as object) }),
+  sendPhoto: (c, p, caption, o) => bot.api.sendPhoto(c, new InputFile(p), { caption, ...(o as object) }),
 };
 const sender: MessageSender = { sendMessage: (c, t, o) => bot.api.sendMessage(c, t, o as never) };
 const provider = createProvider(app.cfg.scoring.provider);
@@ -49,12 +62,12 @@ async function tick() {
 }
 
 const draftProvider = createProvider(app.cfg.drafting.provider);
+const STALE_FILL_SUBMIT_MS = 15 * 60_000;
 const draftCapGate = createDailyGate();
-const holder = createBrowserHolder(() => openBrowser({ headless: app.cfg.browser.headless, userDataDir: join(app.root, 'data/browser') }));
 const throttleLaunchLog = createLogThrottle(60 * 60_000);
 const failureWatch = createFailureWatch();
 const draftLoop = createDraftLoop({
-  run: async () => {
+  run: () => browserLock(async () => {
     // Only launch the browser when there is something to draft (stale `drafting` jobs are swept back first).
     const pending = hasDraftWork(app.db);
     const session = pending
@@ -76,10 +89,32 @@ const draftLoop = createDraftLoop({
       if (r.capped && draftCapGate(new Date())) {
         await draftSender.sendMessage(chatId, `⚠️ Daily drafting spend cap ($${app.cfg.drafting.dailySpendCapUsd}) reached; drafts paused until tomorrow (UTC).`).catch((e) => console.error('[draft] cap warning failed', e));
       }
+    }
+
+    // Fill (never submits): approved Greenhouse/Lever/Ashby jobs → awaiting_submit with a screenshot, or needs_manual.
+    try {
+      resetStaleFillSubmit(app.db, new Date(Date.now() - STALE_FILL_SUBMIT_MS));
+      // Launch the browser first: if it is unavailable the jobs stay ready_to_apply for the next tick.
+      const browserUp = listJobsForFilling(app.db, 1).length > 0 && await holder.get().then(() => true, (e) => {
+        throttleLaunchLog(() => console.error('[fill] browser unavailable:', e instanceof Error ? e.message : e));
+        return false;
+      });
+      if (browserUp) {
+        const f = await runFill({
+          db: app.db, cfg: app.cfg, provider: draftProvider, profile: app.profile, answers: app.answers, shotsDir, pages,
+        });
+        if (f.filled || f.manual) console.log(`[fill] filled=${f.filled} manual=${f.manual}`);
+      }
+    } catch (e) {
+      console.error('[fill] loop error', e);
+    }
+
+    if (telegramUp && chatId) {
       await notifyDrafts(draftSender, chatId, app.db);
       await notifyDraftFailures(draftSender, chatId, app.db);
+      await notifySubmissions(draftSender, chatId, app.db, app.cfg);
     }
-  },
+  }),
 });
 setInterval(() => void draftLoop.tick(), app.cfg.drafting.pollSeconds * 1000);
 

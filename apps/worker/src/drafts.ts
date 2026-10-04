@@ -6,13 +6,13 @@ import {
 import { escapeHtml, type MessageSender } from './telegram';
 
 export interface DraftSender extends MessageSender {
-  sendDocument(chatId: string, path: string, caption: string): Promise<unknown>;
+  sendDocument(chatId: string, path: string, caption: string, other?: Record<string, unknown>): Promise<unknown>;
 }
 
 const LIMIT = 4000;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-function truncate(text: string, max: number): string {
+export function truncate(text: string, max: number): string {
   const chars = Array.from(text);
   return chars.length > max ? `${chars.slice(0, max).join('')}…` : text;
 }
@@ -94,6 +94,11 @@ export function parseDraftCallback(data: string): { action: 'approve' | 'skip' |
   return { action: m[1] === 'ap' ? 'approve' : m[1] === 'sd' ? 'skip' : 'applied', jobId: Number(m[2]) };
 }
 
+/** Mark applied: after the copy-paste flow, or after a fill/submit the user finished by hand. */
+const MARKABLE_APPLIED: readonly JobStatus[] = ['ready_to_apply', 'needs_manual', 'submit_failed'];
+/** Skip: the copy-paste messages (sent for needs_manual / submit_failed too) carry a Skip button. */
+const SKIPPABLE: readonly JobStatus[] = ['draft_ready', 'ready_to_apply', 'needs_manual', 'submit_failed'];
+
 export function handleDraftAction(
   db: Db, allowedChatId: string, fromChatId: string | number | undefined, data: string, now = new Date(),
 ): { ok: boolean; text: string; jobId?: number; next?: 'ready' | 'applied' } {
@@ -103,13 +108,13 @@ export function handleDraftAction(
   const job = getJob(db, p.jobId);
   if (!job) return { ok: false, text: 'Job not found' };
   if (p.action === 'applied') {
-    if (job.status !== 'ready_to_apply') return { ok: false, text: `Already ${job.status}` };
+    if (!MARKABLE_APPLIED.includes(job.status)) return { ok: false, text: `Already ${job.status}` };
     setStatus(db, job.id, 'applied', 'telegram', {}, now);
     return { ok: true, text: '📨 Marked applied', jobId: job.id, next: 'applied' };
   }
   if (p.action === 'skip') {
-    if (job.status !== 'draft_ready' && job.status !== 'ready_to_apply') return { ok: false, text: `Already ${job.status}` };
-    setStatus(db, job.id, 'skipped', `telegram ${job.status === 'draft_ready' ? 'draft' : 'ready'}`, {}, now);
+    if (!SKIPPABLE.includes(job.status)) return { ok: false, text: `Already ${job.status}` };
+    setStatus(db, job.id, 'skipped', `telegram ${job.status === 'draft_ready' ? 'draft' : job.status === 'ready_to_apply' ? 'ready' : job.status}`, {}, now);
     return { ok: true, text: '⏭ Skipped', jobId: job.id };
   }
   if (job.status !== 'draft_ready') return { ok: false, text: `Already ${job.status}` };

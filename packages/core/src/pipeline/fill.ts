@@ -64,14 +64,15 @@ export function jobTarget(job: Pick<JobRow, 'resolvedApplyUrl' | 'resolvedKind'>
 
 /**
  * Stale `filling` → `ready_to_apply` (retried). Stale `submitting` → `submit_failed`, never back to awaiting_submit:
- * the click may have happened. Its submission row keeps `submittedAt` so it still counts against the limits.
+ * the click may have happened. Its submission row keeps `submittedAt` so it still counts against the limits, and its
+ * `notifiedAt` is cleared so the worker tells the user once (the fill card was already notified).
  */
 export function resetStaleFillSubmit(db: Db, olderThan: Date, now = new Date()): void {
   for (const j of listStaleByStatus(db, 'filling', olderThan)) setStatus(db, j.id, 'ready_to_apply', 'stale filling reset', {}, now);
   for (const j of listStaleByStatus(db, 'submitting', olderThan)) {
     setStatus(db, j.id, 'submit_failed', STALE_SUBMIT_NOTE, {}, now);
     const sub = latestSubmission(db, j.id);
-    if (sub && (sub.result === 'filled' || sub.result === 'dry_run')) updateSubmission(db, sub.id, { result: 'failed', evidence: STALE_SUBMIT_NOTE });
+    if (sub && (sub.result === 'filled' || sub.result === 'dry_run')) updateSubmission(db, sub.id, { result: 'failed', evidence: STALE_SUBMIT_NOTE, notifiedAt: null });
   }
 }
 

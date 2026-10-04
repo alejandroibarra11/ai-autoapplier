@@ -131,6 +131,16 @@ describe('runFill', () => {
     expect(sub.submittedAt).not.toBeNull(); // a possibly-clicked submission keeps counting against the limits
   }, 90_000);
 
+  it('resetStaleFillSubmit makes the stale submit_failed notifiable again (the fill card was already notified)', () => {
+    const r = readyJob({ now });
+    const subId = insertSubmission(r.db, { jobId: r.jobId, plan: { entries: [], missingRequired: [], manualReasons: [] }, fillShot: null, result: 'filled' }, min(30));
+    updateSubmission(r.db, subId, { notifiedAt: min(29), dryRun: false, submittedAt: min(20) });
+    setStatus(r.db, r.jobId, 'submitting', null, {}, min(20));
+    resetStaleFillSubmit(r.db, min(15), now);
+    const sub = latestSubmission(r.db, r.jobId)!;
+    expect(sub).toMatchObject({ result: 'failed', notifiedAt: null });
+  });
+
   it('resetStaleFillSubmit leaves fresh filling/submitting jobs alone', () => {
     const r = readyJob({ now });
     const s = readyJob({ db: r.db, now });

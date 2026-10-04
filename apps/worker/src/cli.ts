@@ -94,7 +94,37 @@ if (cmd === 'once') {
       } finally { await session?.close().catch(() => {}); }
     }
   }
+} else if (cmd === 'fill') {
+  // Fills the form for one ready_to_apply job and stops: never submits (there is no `cli submit`).
+  const id = Number(process.argv[3]);
+  const { getJob, runFill, openBrowser, latestSubmission } = await import('@autoapplier/core');
+  const { join } = await import('node:path');
+  const { AUTO_FILL_KINDS } = await import('./submissions');
+  const job = Number.isInteger(id) ? getJob(app.db, id) : null;
+  if (!job) { console.log(`job ${process.argv[3]} not found`); process.exitCode = 1; }
+  else if (job.status !== 'ready_to_apply') { console.error(`job ${id} is ${job.status}; cli fill only works for ready_to_apply (approve the draft first)`); process.exitCode = 1; }
+  else if (!AUTO_FILL_KINDS.includes(job.resolvedKind ?? '')) { console.error(`job ${id} applies via ${job.resolvedKind ?? 'unknown'}; cli fill supports ${AUTO_FILL_KINDS.join(', ')}`); process.exitCode = 1; }
+  else {
+    const session = await openBrowser({ headless: app.cfg.browser.headless, userDataDir: join(app.root, 'data/browser-cli') });
+    try {
+      const r = await runFill({
+        db: app.db, cfg: app.cfg, provider: createProvider(app.cfg.drafting.provider), profile: app.profile, answers: app.answers,
+        shotsDir: join(app.root, 'data/screenshots'), pages: { newPage: () => session.context.newPage() }, onlyJobId: id,
+      });
+      console.log(r);
+      const sub = latestSubmission(app.db, id);
+      console.log(`status: ${getJob(app.db, id)?.status}`);
+      if (sub) {
+        console.log('plan:');
+        for (const e of sub.plan.entries) console.log(`  [${e.source}] ${e.label} (${e.kind}${e.required ? ', required' : ''}): ${e.value.replace(/\s+/g, ' ').slice(0, 120)}`);
+        for (const m of sub.plan.missingRequired) console.log(`  [missing] ${m.label}`);
+        console.log(`result: ${sub.result}${sub.evidence ? ` — ${sub.evidence}` : ''}`);
+        console.log(`screenshot: ${sub.fillShot ?? '(none)'}`);
+      }
+      console.log('Not submitted. Submit from Telegram (🚀 Submit) or the dashboard.');
+    } finally { await session.close().catch(() => {}); }
+  }
 } else {
-  console.log('usage: pnpm --filter @autoapplier/worker cli <once|export-eval [n]|eval [model]|draft <jobId>>');
+  console.log('usage: pnpm --filter @autoapplier/worker cli <once|export-eval [n]|eval [model]|draft <jobId>|fill <jobId>>');
   process.exitCode = 1;
 }
