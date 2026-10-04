@@ -129,7 +129,7 @@ export const leverFiller: AtsFiller = {
     const order = [...plan.entries.filter((x) => x.fieldId === 'identity:resume'), ...plan.entries.filter((x) => x.fieldId !== 'identity:resume')];
     const written: Written[] = [];
     return runFill(page, plan, order, (e) => (e.fieldId.startsWith('identity:') ? fillIdentity(page, plan, e, written) : fillCustom(page, e)), undefined, async (r) => {
-      await page.waitForTimeout(500); // let a late parser result land
+      await page.waitForTimeout(1500); // let a late parser result land: the parse verdict can precede its autofill by a while
       for (const w of written) {
         if (!r.filled.includes(w.fieldId)) continue;
         const now = await page.locator(w.selector).first().inputValue().catch(() => null);

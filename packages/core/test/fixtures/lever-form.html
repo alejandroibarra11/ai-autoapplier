@@ -50,7 +50,8 @@
       const n = document.querySelector('[name=name]'); if (!n.value) n.value = 'Parsed Name';
     }, 400);
     // a slow parser result that overwrites what was typed in the meantime
-    if (q.includes('overwrite')) setTimeout(() => { document.querySelector('[name=name]').value = 'Parsed Name'; }, 700);
+    // (fires 1 s after the field is typed into, whenever that happens, so the test does not depend on upload timing)
+    if (q.includes('overwrite')) document.querySelector('[name=name]').addEventListener('input', () => setTimeout(() => { document.querySelector('[name=name]').value = 'Parsed Name'; }, 1000), { once: true });
   });
   const li = document.getElementById('location-input');
   const box = document.querySelector('.dropdown-results');
