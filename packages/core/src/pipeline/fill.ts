@@ -7,7 +7,7 @@ import type { Answers } from '../answers';
 import type { ApplyTarget, DraftAnswer } from '../apply/types';
 import { targetFromUrl } from '../apply/resolve';
 import {
-  type JobRow, getJob, insertSubmission, latestDraft, latestSubmission, listJobsForFilling, listStaleByStatus, recordUsage, setStatus, updateSubmission,
+  type JobRow, claimStatus, getJob, insertSubmission, latestDraft, latestSubmission, listJobsForFilling, listStaleByStatus, recordUsage, setStatus, updateSubmission,
 } from '../db/repo';
 import { costUsd, type LLMProvider } from '../llm/provider';
 import { draftJob, isBlockingFlag } from '../draft/draft';
@@ -24,6 +24,8 @@ export interface PageFactory { newPage(): Promise<Page> }
 export interface FillDeps {
   db: Db; cfg: Config; provider: LLMProvider; profile: Profile; answers: Answers; shotsDir: string;
   pages: PageFactory; now?: Date; limit?: number; onlyJobId?: number;
+  /** Test seam: runs after a job is picked and before it is claimed. */
+  hooks?: { beforeClaim?: () => void | Promise<void> };
 }
 export interface FillRunResult { filled: number; manual: number }
 
@@ -129,7 +131,9 @@ export async function runFill(d: FillDeps): Promise<FillRunResult> {
   for (const job of queue) {
     const filler = fillerFor(job.resolvedKind ?? '');
     if (!filler) continue;
-    setStatus(db, job.id, 'filling', null, {}, now);
+    await d.hooks?.beforeClaim?.();
+    // Atomic claim: a concurrent runFill (or a user action) that changed the job first wins; skip it then.
+    if (!claimStatus(db, job.id, 'ready_to_apply', 'filling', null, now)) continue;
     const ctx: FillCtx = { page: null, plan: EMPTY_PLAN, done: false };
     let out: Outcome;
     try {

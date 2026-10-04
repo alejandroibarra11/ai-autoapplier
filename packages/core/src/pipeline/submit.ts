@@ -15,6 +15,8 @@ export interface SubmitDeps {
   db: Db; cfg: Config; profile: Profile; answers: Answers; shotsDir: string; pages: PageFactory; now?: Date;
   /** How long to wait for a confirmation after the click (default 30 s). */
   confirmTimeoutMs?: number;
+  /** Test seams: `beforeClaim` runs after the early checks; `beforeGate` right before the pre-click limit check. */
+  hooks?: { beforeClaim?: () => void | Promise<void>; beforeGate?: () => void | Promise<void> };
 }
 export type SubmitRunResult =
   | { status: 'refused'; reason: string }
@@ -47,6 +49,7 @@ export async function runSubmit(d: SubmitDeps, jobId: number): Promise<SubmitRun
     const allowed = checkSubmitAllowed(db, cfg, now);
     if (!allowed.ok) return refuse(allowed.reason);
   }
+  await d.hooks?.beforeClaim?.();
   if (!claimStatus(db, jobId, 'awaiting_submit', 'submitting', dryRun ? 'dry run' : null, now)) {
     return refuse(`Not awaiting submit (status ${getJob(db, jobId)?.status ?? 'unknown'})`);
   }
@@ -81,6 +84,7 @@ export async function runSubmit(d: SubmitDeps, jobId: number): Promise<SubmitRun
       return { status: 'dry_run', shot };
     }
 
+    await d.hooks?.beforeGate?.();
     // Re-check the limits and record the click in one immediate transaction, right before clicking.
     const at = d.now ?? new Date();
     const gate = db.transaction(() => {

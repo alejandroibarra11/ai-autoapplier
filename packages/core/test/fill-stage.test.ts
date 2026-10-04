@@ -140,4 +140,21 @@ describe('runFill', () => {
     expect(getJob(r.db, r.jobId)!.status).toBe('filling');
     expect(getJob(r.db, s.jobId)!.status).toBe('submitting');
   });
+
+  it('two concurrent runFill on one job: one claim, one submission row', async () => {
+    const r = readyJob({ now });
+    const [a, b] = await Promise.all([runFill(deps(r, { onlyJobId: r.jobId })), runFill(deps(r, { onlyJobId: r.jobId }))]);
+    expect(a.filled + b.filled).toBe(1);
+    expect(a.manual + b.manual).toBe(0);
+    expect(r.db.$client.prepare('select count(*) n from submissions where job_id = ?').get(r.jobId)).toEqual({ n: 1 });
+    expect(listEvents(r.db, r.jobId).filter((e) => e.toStatus === 'filling')).toHaveLength(1);
+  }, 90_000);
+
+  it('runFill skips a job whose claim fails (no submission row)', async () => {
+    const r = readyJob({ now });
+    const res = await runFill(deps(r, { onlyJobId: r.jobId, hooks: { beforeClaim: () => { setStatus(r.db, r.jobId, 'skipped', null, {}, now); } } }));
+    expect(res).toEqual({ filled: 0, manual: 0 });
+    expect(getJob(r.db, r.jobId)!.status).toBe('skipped');
+    expect(latestSubmission(r.db, r.jobId)).toBeUndefined();
+  }, 30_000);
 });

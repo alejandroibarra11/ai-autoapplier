@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { existsSync } from 'node:fs';
-import { chromium, type Browser } from 'playwright';
+import { chromium, type Browser, type Page } from 'playwright';
 import { runFill } from '../src/pipeline/fill';
 import { runSubmit, type SubmitDeps } from '../src/pipeline/submit';
 import { claimStatus, getJob, insertSubmission, listEvents, latestSubmission, setStatus, updateSubmission } from '../src/db/repo';
@@ -60,11 +60,71 @@ describe('runSubmit', () => {
     expect(state.posted.length).toBe(1);
   }, 90_000);
 
-  it('two concurrent submits on the same job: exactly one POST, the other refused', async () => {
+  it('two concurrent submits that both pass the early checks: the atomic claim lets exactly one through (one POST)', async () => {
     const r = await filledJob();
-    const [a, b] = await Promise.all([runSubmit(sdeps(r, live), r.jobId), runSubmit(sdeps(r, live), r.jobId)]);
-    expect([a.status, b.status].sort()).toEqual(['applied', 'refused']);
+    let arrived = 0;
+    let release!: () => void;
+    const barrier = new Promise<void>((res) => { release = res; });
+    // both calls wait here, after the early status/limit checks and before claiming, until both have arrived
+    const beforeClaim = async () => { if (++arrived === 2) release(); await barrier; };
+    const [a, b] = await Promise.all([
+      runSubmit(sdeps(r, live, { hooks: { beforeClaim } }), r.jobId),
+      runSubmit(sdeps(r, live, { hooks: { beforeClaim } }), r.jobId),
+    ]);
+    expect(arrived).toBe(2);
+    const statuses = [a.status, b.status].sort();
+    expect(statuses).toEqual(['applied', 'refused']);
+    expect([a, b].find((x) => x.status === 'refused')).toEqual({ status: 'refused', reason: 'Not awaiting submit (status submitting)' });
     expect(state.posted.length).toBe(1);
+  }, 90_000);
+
+  it('dry run then real submit on the same job: the real one re-fills on a new page, verifies, one POST, applied', async () => {
+    const r = await filledJob();
+    const pages = fakePages(browser, state);
+    expect((await runSubmit(sdeps(r, baseCfg, { pages }), r.jobId)).status).toBe('dry_run');
+    expect(state.posted).toEqual([]);
+    const out = await runSubmit(sdeps(r, live, { pages }), r.jobId);
+    expect(out.status).toBe('applied');
+    expect(pages.opened).toHaveLength(2);
+    expect(pages.opened[0]).not.toBe(pages.opened[1]);
+    expect(pages.opened.every((p) => p.isClosed())).toBe(true);
+    expect(state.posted.length).toBe(1);
+    const sub = latestSubmission(r.db, r.jobId)!;
+    expect(sub).toMatchObject({ result: 'submitted', dryRun: false });
+    expect(sub.submittedAt).toEqual(now);
+  }, 90_000);
+
+  it('pre-click gate: a real submission recorded after the early check → refused, no POST, back to awaiting_submit', async () => {
+    const r = await filledJob();
+    const other = readyJob({ db: r.db, now });
+    const beforeGate = () => {
+      const id = insertSubmission(r.db, { jobId: other.jobId, plan: { entries: [], missingRequired: [], manualReasons: [] }, fillShot: null, result: 'submitted' }, now);
+      updateSubmission(r.db, id, { dryRun: false, submittedAt: now });
+    };
+    const out = await runSubmit(sdeps(r, live, { hooks: { beforeGate } }), r.jobId);
+    expect(out).toEqual({ status: 'refused', reason: 'Please wait 120s before the next submission' });
+    expect(state.posted).toEqual([]);
+    expect(getJob(r.db, r.jobId)!.status).toBe('awaiting_submit');
+    const sub = latestSubmission(r.db, r.jobId)!;
+    expect(sub.dryRun).toBe(true);
+    expect(sub.submittedAt).toBeNull();
+  }, 90_000);
+
+  it('an exception after the click attempt started → submit_failed, submission failed, submittedAt kept', async () => {
+    const r = await filledJob();
+    // submit does nothing, so the filler keeps polling; once past the gate every wait on the page throws
+    state.html = fixture('greenhouse-form.html').replace('</body>', '<script>document.addEventListener("submit", (e) => { e.preventDefault(); e.stopPropagation(); }, true);</script></body>');
+    const pages = fakePages(browser, state);
+    const broken = { newPage: async () => { const p = await pages.newPage(); hooked.page = p; return p; } };
+    const hooked: { page: Page | null } = { page: null };
+    const beforeGate = () => { hooked.page!.waitForTimeout = async () => { throw new Error('page crashed after click'); }; };
+    const out = await runSubmit(sdeps(r, live, { pages: broken, hooks: { beforeGate }, confirmTimeoutMs: 5000 }), r.jobId);
+    expect(out).toMatchObject({ status: 'submit_failed', reason: 'page crashed after click' });
+    expect(getJob(r.db, r.jobId)!.status).toBe('submit_failed');
+    const sub = latestSubmission(r.db, r.jobId)!;
+    expect(sub.result).toBe('failed');
+    expect(sub.dryRun).toBe(false);
+    expect(sub.submittedAt).toEqual(now);
   }, 90_000);
 
   it('rate limit: a real submission 30 s ago → refused with the wait message, no POST, status unchanged', async () => {
