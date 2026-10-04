@@ -1,4 +1,5 @@
 import { Bot, GrammyError, InlineKeyboard } from 'grammy';
+import { handleDraftAction } from './drafts';
 import {
   formatComp, getJob, latestScore, listUnnotified, markNotified, setStatus,
   type Db, type JobRow, type ScorePayload,
@@ -103,12 +104,20 @@ export async function notifyPending(
   return sent;
 }
 
-export function createBot(token: string, chatId: string, db: Db): Bot {
+export function createBot(token: string, chatId: string, db: Db, onReady?: (jobId: number) => Promise<void>): Bot {
   const bot = new Bot(token);
   bot.command('start', (ctx) => ctx.reply(`Chat id: ${ctx.chat.id}\nPut it in .env as TELEGRAM_CHAT_ID.`));
   bot.on('callback_query:data', async (ctx) => {
-    const r = handleDecision(db, chatId, ctx.chat?.id, ctx.callbackQuery.data);
-    await ctx.answerCallbackQuery({ text: r.text });
+    const data = ctx.callbackQuery.data;
+    if (/^(ap|sd|ma):/.test(data)) {
+      const r = handleDraftAction(db, chatId, ctx.chat?.id, data);
+      await ctx.answerCallbackQuery({ text: r.text });
+      if (r.ok) await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() }).catch(() => {});
+      if (r.ok && r.next === 'ready' && r.jobId !== undefined && onReady) await onReady(r.jobId).catch((e) => console.error('[telegram] ready message failed', e));
+      return;
+    }
+    const r = handleDecision(db, chatId, ctx.chat?.id, data);
+    await ctx.answerCallbackQuery({ text: r.ok && r.text.startsWith('👍') ? '👍 Shortlisted — drafting…' : r.text });
     if (r.ok && r.applyUrl) {
       await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard().url(`${r.text} · 🔗 Open posting`, r.applyUrl) });
     }
