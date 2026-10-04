@@ -37,3 +37,11 @@ describe('config', () => {
     expect(() => parseConfig('pollIntervalHours: 3')).toThrow();
   });
 });
+
+describe('drafting config', () => {
+  it('loads drafting and browser sections', () => {
+    const cfg = loadConfig(join(findRoot(), 'config.yaml'));
+    expect(cfg.drafting).toEqual({ provider: 'anthropic', model: 'claude-opus-5-5', effort: 'medium', dailySpendCapUsd: 3, maxAttempts: 2, pollSeconds: 60 });
+    expect(cfg.browser).toEqual({ headless: true, timeoutMs: 20000 });
+  });
+});

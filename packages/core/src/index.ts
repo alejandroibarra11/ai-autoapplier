@@ -13,6 +13,7 @@ export { detectAts, findAtsInHtml } from './sources/ats-detect';
 export * from './config';
 export * from './profile';
 export * from './score/schema';
+export * from './apply/types';
 export * from './db/schema';
 export * from './db/client';
 export * from './db/repo';

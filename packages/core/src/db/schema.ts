@@ -1,6 +1,7 @@
 import { sqliteTable, integer, text, real, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
 import type { Ats, CompPeriod, JobStatus } from '../types';
 import type { ScorePayload } from '../score/schema';
+import type { ResolvedKind, DraftAnswer, FormQuestion, CvSelection } from '../apply/types';
 
 export const companies = sqliteTable('companies', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -36,6 +37,9 @@ export const jobs = sqliteTable('jobs', {
   lowPay: integer('low_pay', { mode: 'boolean' }).notNull().default(false),
   scoreAttempts: integer('score_attempts').notNull().default(0),
   notifiedAt: integer('notified_at', { mode: 'timestamp' }),
+  resolvedApplyUrl: text('resolved_apply_url'),
+  resolvedKind: text('resolved_kind').$type<ResolvedKind>(),
+  draftAttempts: integer('draft_attempts').notNull().default(0),
 }, (t) => [
   uniqueIndex('jobs_source_job').on(t.source, t.sourceJobId),
   index('jobs_dedupe_key').on(t.dedupeKey),
@@ -70,3 +74,19 @@ export const llmUsage = sqliteTable('llm_usage', {
   costUsd: real('cost_usd').notNull(),
   at: integer('at', { mode: 'timestamp' }).notNull(),
 });
+
+export const drafts = sqliteTable('drafts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  jobId: integer('job_id').notNull().references(() => jobs.id),
+  model: text('model').notNull(),
+  coverLetter: text('cover_letter').notNull(),
+  answers: text('answers', { mode: 'json' }).$type<DraftAnswer[]>().notNull(),
+  questions: text('questions', { mode: 'json' }).$type<FormQuestion[]>().notNull(),
+  cvSelection: text('cv_selection', { mode: 'json' }).$type<CvSelection>().notNull(),
+  cvPdfPath: text('cv_pdf_path'),
+  flags: text('flags', { mode: 'json' }).$type<string[]>().notNull(),
+  editedByUser: integer('edited_by_user', { mode: 'boolean' }).notNull().default(false),
+  notifiedAt: integer('notified_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+}, (t) => [index('drafts_job').on(t.jobId)]);

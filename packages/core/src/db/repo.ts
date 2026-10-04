@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import type { Db } from './client';
-import { companies, jobEvents, jobs, llmUsage, scores } from './schema';
+import { companies, drafts, jobEvents, jobs, llmUsage, scores } from './schema';
+import type { DraftAnswer, FormQuestion, CvSelection, ResolvedKind } from '../apply/types';
 import type { Ats, JobStatus, NormalizedJob } from '../types';
 import type { ScorePayload } from '../score/schema';
 import { dedupeKey } from '../text';
@@ -9,7 +10,7 @@ export type JobRow = typeof jobs.$inferSelect;
 export type CompanyRow = typeof companies.$inferSelect;
 export type JobEventRow = typeof jobEvents.$inferSelect;
 
-export interface StatusPatch { filterReason?: string | null; lowPay?: boolean; scoreAttempts?: number }
+export interface StatusPatch { filterReason?: string | null; lowPay?: boolean; scoreAttempts?: number; draftAttempts?: number }
 export interface UsageInput {
   jobId: number | null; stage: string; provider: string; model: string;
   inputTokens: number; outputTokens: number; costUsd: number;
@@ -91,9 +92,9 @@ export function recordUsage(db: Db, u: UsageInput, now = new Date()): void {
   db.insert(llmUsage).values({ ...u, at: now }).run();
 }
 
-export function spendSince(db: Db, since: Date): number {
-  const r = db.select({ total: sql<number>`coalesce(sum(${llmUsage.costUsd}), 0)` })
-    .from(llmUsage).where(gte(llmUsage.at, since)).get();
+export function spendSince(db: Db, since: Date, stage?: string): number {
+  const where = stage ? and(gte(llmUsage.at, since), eq(llmUsage.stage, stage)) : gte(llmUsage.at, since);
+  const r = db.select({ total: sql<number>`coalesce(sum(${llmUsage.costUsd}), 0)` }).from(llmUsage).where(where).get();
   return r?.total ?? 0;
 }
 
@@ -132,4 +133,45 @@ export function spendByDay(db: Db, days = 14): { day: string; costUsd: number }[
   const day = sql<string>`date(${llmUsage.at}, 'unixepoch')`;
   return db.select({ day, costUsd: sql<number>`sum(${llmUsage.costUsd})` }).from(llmUsage)
     .groupBy(day).orderBy(desc(day)).limit(days).all();
+}
+
+export type DraftRow = typeof drafts.$inferSelect;
+export interface DraftInput {
+  jobId: number; model: string; coverLetter: string; answers: DraftAnswer[]; questions: FormQuestion[];
+  cvSelection: CvSelection; cvPdfPath: string | null; flags: string[];
+}
+
+export function insertDraft(db: Db, d: DraftInput, now = new Date()): number {
+  const r = db.insert(drafts).values({ ...d, createdAt: now, updatedAt: now }).returning({ id: drafts.id }).get();
+  return r.id;
+}
+
+export function latestDraft(db: Db, jobId: number): DraftRow | undefined {
+  return db.select().from(drafts).where(eq(drafts.jobId, jobId)).orderBy(desc(drafts.id)).limit(1).get();
+}
+
+export function updateDraftContent(db: Db, draftId: number, c: { coverLetter: string; answers: DraftAnswer[] }, now = new Date()): void {
+  db.update(drafts).set({ ...c, editedByUser: true, updatedAt: now }).where(eq(drafts.id, draftId)).run();
+}
+
+export function markDraftNotified(db: Db, draftId: number, now = new Date()): void {
+  db.update(drafts).set({ notifiedAt: now }).where(eq(drafts.id, draftId)).run();
+}
+
+export function listUnnotifiedDrafts(db: Db, limit: number): { job: JobRow; draft: DraftRow }[] {
+  const out: { job: JobRow; draft: DraftRow }[] = [];
+  for (const job of listJobsByStatus(db, ['draft_ready'], 1000)) {
+    const draft = latestDraft(db, job.id);
+    if (draft && !draft.notifiedAt) out.push({ job, draft });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+export function listJobsForDrafting(db: Db, limit: number): JobRow[] {
+  return db.select().from(jobs).where(eq(jobs.status, 'shortlisted')).orderBy(asc(jobs.updatedAt), asc(jobs.id)).limit(limit).all();
+}
+
+export function setResolved(db: Db, jobId: number, url: string, kind: ResolvedKind): void {
+  db.update(jobs).set({ resolvedApplyUrl: url, resolvedKind: kind }).where(eq(jobs.id, jobId)).run();
 }

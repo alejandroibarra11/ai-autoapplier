@@ -4,6 +4,7 @@ export type CompPeriod = 'hour' | 'month' | 'year';
 export const JOB_STATUSES = [
   'discovered', 'filtered_out', 'passed_rules', 'score_failed',
   'ineligible', 'low_score', 'awaiting_review', 'shortlisted', 'skipped',
+  'drafting', 'draft_ready', 'draft_failed', 'ready_to_apply', 'applied',
 ] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
