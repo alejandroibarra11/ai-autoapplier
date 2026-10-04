@@ -47,15 +47,18 @@ if (cmd === 'once') {
     process.exitCode = 1;
   } else {
     const provider = createProvider(providerName);
-    const lines = readFileSync(join(app.root, 'data/eval/eligibility.jsonl'), 'utf8').split('\n').filter(Boolean);
-    const labeled = lines.map((l) => JSON.parse(l) as { jobId: number; label: 'eligible' | 'ineligible' | null }).filter((r) => r.label);
+    const { parseEvalLabels } = await import('./eval-labels');
+    const parsed = parseEvalLabels(readFileSync(join(app.root, 'data/eval/eligibility.jsonl'), 'utf8'));
+    for (const bad of parsed.invalid) console.log(`skipping line ${bad.line}: ${bad.reason}`);
+    if (parsed.unlabeled) console.log(`${parsed.unlabeled} unlabeled rows ignored`);
+    const labeled = parsed.rows;
     const rows = [];
     for (const r of labeled) {
       const job = getJob(app.db, r.jobId);
       if (!job) continue;
       const s = await scoreJob(provider, model, app.profileText, job, (u) =>
         recordUsage(app.db, { jobId: job.id, stage: 'eval', ...u, costUsd: costUsd(app.cfg.pricing, u) }));
-      rows.push({ jobId: job.id, label: r.label!, predicted: s.eligibility });
+      rows.push({ jobId: job.id, label: r.label, predicted: s.eligibility });
     }
     const m = computeEligibilityMetrics(rows);
     console.log(`model=${model} n=${m.n} accuracy=${(m.accuracy * 100).toFixed(1)}%`);
