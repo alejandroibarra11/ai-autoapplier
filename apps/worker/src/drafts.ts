@@ -1,7 +1,7 @@
 import { InlineKeyboard } from 'grammy';
 import {
   getJob, isBlockingFlag, latestDraft, listUnnotifiedDraftFailures, listUnnotifiedDrafts, markDraftFailureNotified, markDraftNotified, setStatus,
-  type Db, type DraftRow, type JobRow,
+  type Db, type DraftRow, type JobRow, type JobStatus,
 } from '@autoapplier/core';
 import { escapeHtml, type MessageSender } from './telegram';
 
@@ -186,5 +186,14 @@ export async function notifyDraftFailures(sender: MessageSender, chatId: string,
     sent++;
   }
   return sent;
+}
+
+const CLI_DRAFTABLE: readonly JobStatus[] = ['awaiting_review', 'shortlisted', 'draft_ready', 'draft_failed'];
+
+/** Why `cli draft` must not (re)draft a job in this status, or null when it may. */
+export function cliDraftRefusal(status: JobStatus): string | null {
+  if (status === 'drafting') return 'is currently being drafted; try again in a few minutes';
+  if (CLI_DRAFTABLE.includes(status)) return null;
+  return `is ${status}; cli draft only works for ${CLI_DRAFTABLE.slice(0, -1).join(', ')} or ${CLI_DRAFTABLE.at(-1)}`;
 }
 

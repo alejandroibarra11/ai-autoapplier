@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { openDb, insertJobs, listJobsByStatus, setStatus, insertDraft, getJob, latestDraft, type DraftInput } from '@autoapplier/core';
-import { formatDraftCard, formatDraftFailure, formatReadyMessages, handleDraftAction, notifyDraftFailures, notifyDrafts, parseDraftCallback, sendReady } from '../src/drafts';
+import { cliDraftRefusal, formatDraftCard, formatDraftFailure, formatReadyMessages, handleDraftAction, notifyDraftFailures, notifyDrafts, parseDraftCallback, sendReady } from '../src/drafts';
 
 function setup(flags: string[] = [], coverLetter = 'I build <LLM> tools & agents.') {
   const db = openDb(':memory:');
@@ -241,5 +241,12 @@ describe('draft failure notices', () => {
     expect(await notifyDraftFailures(sender, 'c', db)).toBe(0);
     expect(getJob(db, id)!.draftFailureNotifiedAt).toBeNull();
   });
+});
+
+describe('cliDraftRefusal', () => {
+  it.each(['awaiting_review', 'shortlisted', 'draft_ready', 'draft_failed'] as const)('allows %s', (st) => expect(cliDraftRefusal(st)).toBeNull());
+  it('explains drafting', () => expect(cliDraftRefusal('drafting')).toMatch(/currently being drafted/));
+  it.each(['ready_to_apply', 'applied', 'skipped', 'filtered_out', 'discovered'] as const)('refuses %s', (st) =>
+    expect(cliDraftRefusal(st)).toMatch(new RegExp(`is ${st}; cli draft only works for awaiting_review, shortlisted, draft_ready or draft_failed`)));
 });
 

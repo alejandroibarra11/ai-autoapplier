@@ -69,10 +69,12 @@ if (cmd === 'once') {
   const id = Number(process.argv[3]);
   const { getJob, setStatus, runDrafting, resolveApplyTarget, extractQuestions, openBrowser, makePageOpener, renderPdf, latestDraft } = await import('@autoapplier/core');
   const { join } = await import('node:path');
+  const { cliDraftRefusal } = await import('./drafts');
   const job = Number.isInteger(id) ? getJob(app.db, id) : null;
   if (!job) { console.log(`job ${process.argv[3]} not found`); process.exitCode = 1; }
   else {
-    if (job.status === 'drafting') { console.log(`job ${id} is currently being drafted; try again in a few minutes`); process.exitCode = 1; }
+    const refusal = cliDraftRefusal(job.status);
+    if (refusal) { console.error(`job ${id} ${refusal}`); process.exitCode = 1; }
     else {
       if (job.status !== 'shortlisted') setStatus(app.db, id, 'shortlisted', 'cli draft');
       let session: Awaited<ReturnType<typeof openBrowser>> | null = null;

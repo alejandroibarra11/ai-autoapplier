@@ -38,6 +38,6 @@ Do these in order:
 6. Heads-up: jobs that are already `shortlisted` will be drafted (and billed against `drafting.dailySpendCapUsd`) within about a minute of the restart.
 7. Approving from the dashboard does not send the Telegram "ready to apply" message; the dashboard itself shows the apply link and the answers. Approve from Telegram if you want the ready message there.
 
-Manual draft for one job (no Telegram; uses its own browser profile `data/browser-cli`, so it can run while the service is up):
+Manual draft for one job in status awaiting_review, shortlisted, draft_ready or draft_failed (no Telegram; uses its own browser profile `data/browser-cli`, so it can run while the service is up):
 
     pnpm --filter @autoapplier/worker cli draft <jobId>
