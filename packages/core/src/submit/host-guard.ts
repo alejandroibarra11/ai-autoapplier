@@ -1,8 +1,12 @@
-const HOSTS = ['127.0.0.1', 'localhost', '[::1]'];
-const PORTS = ['3100', '3101'];
-const ALLOWED = new Set(HOSTS.flatMap((h) => PORTS.map((p) => `${h}:${p}`)));
+const HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
+const HOST = /^(\[::1\]|[^:[\]]+)(?::(\d{1,5}))?$/;
 
-/** Dashboard Host-header allowlist (blocks DNS rebinding): loopback names on the dashboard ports only. */
+/**
+ * Dashboard Host-header allowlist (blocks DNS rebinding): loopback hostnames only, on any port (the dashboard port is
+ * whatever `next start -p` was given). A rebinding attacker controls the hostname, never a loopback one.
+ */
 export function isAllowedHost(host: string | null | undefined): boolean {
-  return !!host && ALLOWED.has(host.toLowerCase());
+  if (!host) return false;
+  const m = HOST.exec(host.toLowerCase());
+  return !!m && HOSTNAMES.has(m[1]!);
 }

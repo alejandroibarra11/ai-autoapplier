@@ -44,8 +44,12 @@ describe('parseRenderedDry', () => {
   });
 });
 describe('isAllowedHost', () => {
-  it('allows only loopback hosts on the dashboard ports', () => {
-    for (const h of ['127.0.0.1:3100', 'localhost:3100', '[::1]:3100', '127.0.0.1:3101', 'localhost:3101', '[::1]:3101']) expect(isAllowedHost(h)).toBe(true);
-    for (const h of [null, '', 'evil.com:3101', 'evil.com', '127.0.0.1:3102', 'localhost.evil.com:3100', '127.0.0.1', 'localhost']) expect(isAllowedHost(h)).toBe(false);
+  it('allows loopback hostnames on any port (the dashboard port is configurable)', () => {
+    for (const h of ['127.0.0.1:3100', 'localhost:3100', '[::1]:3100', '127.0.0.1:3101', 'localhost:3101', '[::1]:3101',
+      'localhost:4000', '127.0.0.1:3102', 'LOCALHOST:8080', '127.0.0.1', 'localhost', '[::1]']) expect(isAllowedHost(h)).toBe(true);
+  });
+  it('rejects every other hostname, whatever the port', () => {
+    for (const h of [null, undefined, '', 'evil.com:3101', 'evil.com:3100', 'evil.com', 'localhost.evil.com:3100', 'localhost.evil.com',
+      '127.0.0.1.evil.com:3100', 'evil-localhost:3100', '::1:3100', 'localhost:', 'localhost:abc', 'localhost:3100:1', 'user@localhost:3100']) expect(isAllowedHost(h)).toBe(false);
   });
 });
