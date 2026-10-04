@@ -15,7 +15,7 @@ const [url, out, cvArg] = process.argv.slice(2);
 if (!url || !out) { console.error('usage: fill-smoke <url> <out.png> [cv.pdf]'); process.exit(1); }
 
 const root = join(import.meta.dirname, '..', '..', '..', 'profile');
-const answers = { ...parseAnswers(readFileSync(join(root, 'answers.example.yaml'), 'utf8')), location: 'Mazatlán, Mexico' }; // real city so the live autocomplete has a match
+const answers = { ...parseAnswers(readFileSync(join(root, 'answers.example.yaml'), 'utf8')), location: 'Guadalajara, Mexico' }; // real city so the live autocomplete has a match
 const profile = parseProfile(readFileSync(join(root, 'profile.example.yaml'), 'utf8'));
 let cv = cvArg;
 if (!cv) { cv = join(mkdtempSync(join(tmpdir(), 'aa-smoke-')), 'cv.pdf'); writeFileSync(cv, '%PDF-1.4 dummy'); }
@@ -35,11 +35,13 @@ try {
   };
   const plan = buildFillPlan({ questions, draft, answers, profile });
   const page = await session.context.newPage();
+  const nonGet: string[] = [];
+  page.on('request', (r) => { if (r.method() !== 'GET' && r.method() !== 'OPTIONS') nonGet.push(`${r.method()} ${r.url().slice(0, 120)}`); });
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
   await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
   const report = await greenhouseFiller.fill(page, plan); // FILL ONLY
   await takeShot(page, out);
-  console.log(JSON.stringify({ plan: { entries: plan.entries.length, missingRequired: plan.missingRequired, manualReasons: plan.manualReasons }, report }, null, 2));
+  console.log(JSON.stringify({ nonGetRequestsDuringFill: nonGet, plan: { entries: plan.entries.length, missingRequired: plan.missingRequired, manualReasons: plan.manualReasons }, report }, null, 2));
   console.log('screenshot', out);
 } finally {
   await session.close();

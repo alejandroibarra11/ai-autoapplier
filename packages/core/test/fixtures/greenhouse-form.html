@@ -14,10 +14,23 @@
   <div class="cb"><label for="question_2">Are you authorized to work? *</label><input id="question_2" role="combobox" autocomplete="off" required aria-required="true" data-options="Yes|No"></div>
   <div><label for="question_3">Why us? *</label><textarea id="question_3" name="question_3" required aria-required="true"></textarea></div>
   <div class="cb"><label for="gender">Gender</label><input id="gender" role="combobox" autocomplete="off" data-options="Male|Female|Decline To Self Identify"></div>
+  <div><label for="question_4">Native pick</label><select id="question_4" name="question_4"><option value=""></option><option>Yes</option><option>Maybe</option></select></div>
+  <div id="question_5" data-chosen=""><button type="button" onclick="this.parentElement.dataset.chosen=this.textContent">Yes</button><button type="button" onclick="this.parentElement.dataset.chosen=this.textContent">No</button></div>
   <button type="submit">Submit application</button>
 </form>
 <script>
 (() => {
+  const q = location.search;
+  if (q.includes('norequired')) document.querySelectorAll('[required]').forEach((el) => { el.removeAttribute('required'); el.removeAttribute('aria-required'); });
+  if (q.includes('errorboundary')) document.body.insertAdjacentHTML('afterbegin', '<div class="error-boundary">Something went wrong loading a widget</div>');
+  // Like Greenhouse: after choosing a file the input is replaced by a chip (or an error).
+  const rl = document.getElementById('resume');
+  rl.addEventListener('change', () => {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = q.includes('uploadfail') ? 'Upload failed' : rl.files[0].name;
+    rl.replaceWith(chip);
+  });
   const close = () => document.querySelectorAll('[role=listbox]').forEach((l) => l.remove());
   const render = (input) => {
     close();
@@ -31,6 +44,7 @@
       el.addEventListener('mousedown', (ev) => { ev.preventDefault(); input.value = o; close(); });
       box.appendChild(el);
     }
+    if (input.getAttribute('aria-controls')) box.id = input.getAttribute('aria-controls');
     input.parentElement.appendChild(box);
   };
   document.querySelectorAll('input[role=combobox]').forEach((input) => {
@@ -42,7 +56,8 @@
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     await fetch('/apply', { method: 'POST', body: new FormData(form) });
-    document.body.innerHTML = '<h1>Thank you for applying</h1>';
+    if (q.includes('errorboundary')) form.replaceWith(Object.assign(document.createElement('h1'), { textContent: 'Thank you for applying' }));
+    else document.body.innerHTML = '<h1>Thank you for applying</h1>';
     history.pushState({}, '', '/acme/jobs/1/confirmation');
   });
 })();
