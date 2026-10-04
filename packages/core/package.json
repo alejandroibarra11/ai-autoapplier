@@ -8,6 +8,7 @@
   "scripts": {
     "test": "vitest run",
     "smoke": "tsx scripts/smoke-sources.ts",
+    "probe": "tsx scripts/probe-companies.ts",
     "typecheck": "tsc -p tsconfig.json",
     "db:generate": "drizzle-kit generate"
   },
