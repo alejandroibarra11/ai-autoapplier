@@ -70,6 +70,10 @@ describe('answers', () => {
   it('accepts curly apostrophe in preferred-name matcher', () => {
     expect(matchFixedAnswer(q("What's the name you'd prefer us to use?"), a)?.key).toBe('firstName');
   });
+
+  it('accepts U+2019 curly apostrophe in preferred-name matcher', () => {
+    expect(matchFixedAnswer(q("What’s the name you’d prefer us to use?"), a)?.key).toBe('firstName');
+  });
 });
 
 describe('pickOption', () => {

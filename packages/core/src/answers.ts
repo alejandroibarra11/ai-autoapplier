@@ -39,7 +39,7 @@ const DEFAULT_MATCHERS: [RegExp, AnswerKey][] = [
   [/time ?zone/i, 'timezone'],
   [/where are you (located|based)|current location|city of residence/i, 'location'],
   [/english (level|proficiency|skills)|proficiency in english|rate your english|english fluency/i, 'englishLevel'],
-  [/prefer(red)? name|name you'?d prefer|name you'?d prefer/i, 'firstName'],
+  [/prefer(red)? name|name you['’]?d prefer/i, 'firstName'],
 ];
 
 export function parseAnswers(yamlText: string): Answers {
