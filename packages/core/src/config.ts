@@ -16,6 +16,7 @@ export const ConfigSchema = z.object({
     rejectPatterns: z.array(z.string()),
     usOnlyLocationPatterns: z.array(z.string()),
     allowedRegionPatterns: z.array(z.string()),
+    allowedLocationOnlyPatterns: z.array(z.string()),
   }),
   pay: z.object({ rejectBelowHourly: z.number(), lowPriorityBelowHourly: z.number() }),
   scoring: z.object({
@@ -44,8 +45,8 @@ export type Config = z.infer<typeof ConfigSchema>;
 
 export function parseConfig(yamlText: string): Config {
   const cfg = ConfigSchema.parse(YAML.parse(yamlText));
-  const { rejectPatterns, usOnlyLocationPatterns, allowedRegionPatterns } = cfg.eligibility;
-  for (const p of [...rejectPatterns, ...usOnlyLocationPatterns, ...allowedRegionPatterns]) {
+  const { rejectPatterns, usOnlyLocationPatterns, allowedRegionPatterns, allowedLocationOnlyPatterns } = cfg.eligibility;
+  for (const p of [...rejectPatterns, ...usOnlyLocationPatterns, ...allowedRegionPatterns, ...allowedLocationOnlyPatterns]) {
     try { new RegExp(p, 'i'); } catch (e) {
       throw new Error(`config: invalid regex "${p}": ${(e as Error).message}`);
     }

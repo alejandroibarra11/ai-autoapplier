@@ -26,7 +26,9 @@ eligibility:
     - "^(san francisco|new york|nyc|seattle|austin|boston|los angeles|chicago|denver|miami)( bay area)?$"
   # if any of these appear in location or description, the US-only location rule does not fire
   allowedRegionPatterns: ["\\bm[eé]xico\\b", "\\blatam\\b", "latin america", "south america", "\\bamericas\\b",
-                          "north america", "worldwide", "\\banywhere\\b", "\\bglobal(ly)?\\b", "\\bdeel\\b"]
+                          "north america", "\\bdeel\\b"]
+  # same, but tested against the location only (descriptions say "global scale", "work from anywhere in the US")
+  allowedLocationOnlyPatterns: ["worldwide", "\\banywhere\\b", "\\bglobal(ly)?\\b"]
 
 pay:
   rejectBelowHourly: 40

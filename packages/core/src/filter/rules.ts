@@ -36,7 +36,8 @@ export function applyRules(job: NormalizedJob, cfg: Config, now = new Date()): R
   const segments = job.locationText.split(/[;|·]/).map((s) => s.trim().toLowerCase()).filter((s) => !PLACEHOLDER_LOCATIONS.test(s));
   const usOnly = segments.length > 0 && segments.every((seg) =>
     cfg.eligibility.usOnlyLocationPatterns.some((p) => new RegExp(p, 'i').test(seg)));
-  const allowed = cfg.eligibility.allowedRegionPatterns.some((p) => new RegExp(p, 'i').test(fullText));
+  const allowed = cfg.eligibility.allowedRegionPatterns.some((p) => new RegExp(p, 'i').test(fullText))
+    || cfg.eligibility.allowedLocationOnlyPatterns.some((p) => new RegExp(p, 'i').test(job.locationText));
   if (usOnly && !allowed) return reject(`location: US only (${job.locationText})`);
 
   let lowPay = false;

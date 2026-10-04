@@ -57,6 +57,20 @@ describe('applyRules', () => {
     expect(ok({ locationText: '', description: 'Great team.' }).pass).toBe(true);
   });
 
+  it('worldwide/anywhere/global only rescue a US-only location when they appear in the location', () => {
+    expect(ok({ locationText: 'Remote - US', description: 'We operate at global scale.' }).reason).toMatch(/^location/);
+    expect(ok({ locationText: 'Remote - US', description: 'Work from anywhere in the country.' }).reason).toMatch(/^location/);
+    expect(ok({ locationText: 'Remote - US', description: 'Customers worldwide.' }).reason).toMatch(/^location/);
+    expect(ok({ locationText: 'Worldwide', description: 'Great team.' }).pass).toBe(true);
+    expect(ok({ locationText: 'Remote - US', description: 'Contractors via Deel welcome.' }).pass).toBe(true);
+    // with every segment treated as US-only, only the location text can carry the location-only patterns
+    const strict = { ...cfg, eligibility: { ...cfg.eligibility, usOnlyLocationPatterns: ['.*'] } };
+    const job = (o: Parameters<typeof makeJob>[0]) => applyRules(makeJob({ postedAt: new Date('2026-10-02T00:00:00Z'), ...o }), strict, now);
+    expect(job({ locationText: 'Worldwide', description: 'Great team.' }).pass).toBe(true);
+    expect(job({ locationText: 'Austin', description: 'Hiring worldwide.' }).reason).toMatch(/^location/);
+    expect(job({ locationText: 'Austin', description: 'Hiring in LATAM.' }).pass).toBe(true);
+  });
+
   it('applies the USD pay floor and low-pay flag', () => {
     expect(ok({ compMax: 70000, compCurrency: 'USD', compPeriod: 'year' }).reason).toMatch(/^pay/);
     expect(ok({ compMin: 35, compMax: 45, compCurrency: 'USD', compPeriod: 'hour' })).toEqual({ pass: true, reason: null, lowPay: true });
