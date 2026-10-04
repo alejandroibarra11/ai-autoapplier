@@ -1,5 +1,5 @@
 import { fillSummary, type JobRow, type SubmissionRow } from '@autoapplier/core';
-import { cancelSubmission, markApplied } from './actions';
+import { cancelSubmission, markApplied, skipJob } from './actions';
 import { SubmitForm } from './submit-form';
 
 const RESULT_TEXT: Record<string, string> = {
@@ -45,6 +45,7 @@ export function SubmitPanel({ job, sub, dryRun }: { job: JobRow; sub: Submission
         <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'flex-start' }}>
           <SubmitForm jobId={job.id} dryRun={dryRun} />
           <form action={cancelSubmission.bind(null, job.id)}><button>✋ Cancel</button></form>
+          <form action={skipJob.bind(null, job.id)}><button>⏭ Skip</button></form>
         </div>
       )}
       {(job.status === 'needs_manual' || job.status === 'submit_failed') && (
@@ -52,6 +53,9 @@ export function SubmitPanel({ job, sub, dryRun }: { job: JobRow; sub: Submission
           {job.status === 'submit_failed' && <p className="muted">Check your email first: the application may have been sent.</p>}
           <button>📨 Mark applied</button>
         </form>
+      )}
+      {(job.status === 'needs_manual' || job.status === 'submit_failed') && (
+        <form action={skipJob.bind(null, job.id)} style={{ marginTop: 8 }}><button>⏭ Skip</button></form>
       )}
       {finished && sub.submitShot && (
         <>

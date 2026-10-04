@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   applyDraftEdits, checkSubmitMode, claimStatus, findRoot, getJob, isBlockingFlag, latestDraft, latestSubmission, loadAnswers, loadConfig,
-  loadProfile, openBrowser, parseRenderedDry, runSubmit, setStatus, updateDraftContent, updateSubmission, type PageFactory,
+  loadProfile, openBrowser, parseRenderedDry, runSubmit, setStatus, skipFromDashboard, updateDraftContent, updateSubmission, type PageFactory,
 } from '@autoapplier/core';
 import { getWriteDb } from '../../../lib/db';
 
@@ -17,7 +17,12 @@ function guard(jobId: number, from: string[]) {
 const done = (jobId: number) => revalidatePath(`/jobs/${jobId}`);
 
 export async function shortlistJob(jobId: number) { const { db } = guard(jobId, ['awaiting_review']); setStatus(db, jobId, 'shortlisted', 'dashboard'); done(jobId); }
-export async function skipJob(jobId: number) { const { db } = guard(jobId, ['awaiting_review', 'draft_ready', 'ready_to_apply']); setStatus(db, jobId, 'skipped', 'dashboard'); done(jobId); }
+/** ⏭ Skip (also from awaiting_submit — cancels the pending submission — needs_manual and submit_failed). */
+export async function skipJob(jobId: number) {
+  const ok = skipFromDashboard(getWriteDb(), jobId);
+  done(jobId);
+  if (!ok) throw new Error(`Job ${jobId} can't be skipped from ${getJob(getWriteDb(), jobId)?.status ?? 'missing'}`);
+}
 export async function regenerateDraft(jobId: number) { const { db } = guard(jobId, ['draft_ready', 'draft_failed']); setStatus(db, jobId, 'shortlisted', 'dashboard regenerate', { draftAttempts: 0, draftFailureNotifiedAt: null }); done(jobId); }
 export async function markApplied(jobId: number) { const { db } = guard(jobId, ['ready_to_apply', 'needs_manual', 'submit_failed']); setStatus(db, jobId, 'applied', 'dashboard'); done(jobId); }
 
