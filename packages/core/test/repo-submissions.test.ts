@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { makeJob, testDb } from './helpers';
 import {
   insertJobs, listJobsByStatus, setStatus, setResolved, insertSubmission, latestSubmission, updateSubmission,
@@ -60,6 +60,32 @@ describe('submissions repo', () => {
     expect(listUnnotifiedSubmissions(db, 10).map((r) => r.sub.id)).toEqual([id]);
     updateSubmission(db, id, { notifiedAt: new Date() });
     expect(listUnnotifiedSubmissions(db, 10)).toEqual([]);
+  });
+  it('only the latest submission per job counts; ordered by job id; limit honoured; one SQL query', () => {
+    const { db, jobs } = seed(8);
+    const ids = jobs.map((j) => j.id).sort((a, b) => a - b);
+    const t = new Date('2026-10-04T12:00:00Z');
+    const add = (jobId: number, notified: boolean) => {
+      const id = insertSubmission(db, { jobId, plan, fillShot: null, result: 'filled' });
+      if (notified) updateSubmission(db, id, { notifiedAt: t });
+      return id;
+    };
+    add(ids[0]!, true);                                   // latest notified → out
+    add(ids[1]!, false); add(ids[1]!, true);              // older unnotified, latest notified → out
+    add(ids[2]!, true); const c = add(ids[2]!, false);    // latest unnotified → in
+    const d = add(ids[3]!, false);                        // in
+    // ids[4] has no submission → out
+    add(ids[5]!, true); add(ids[5]!, true);               // out
+    const g = add(ids[6]!, false);
+    const h = add(ids[7]!, false);
+    const spy = vi.spyOn(db.$client, 'prepare');
+    const rows = listUnnotifiedSubmissions(db, 10);
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+    expect(rows.map((r) => [r.job.id, r.sub.id])).toEqual([[ids[2], c], [ids[3], d], [ids[6], g], [ids[7], h]]);
+    expect(rows[0]!.job).toEqual(listJobsByStatus(db, ['discovered']).find((j) => j.id === ids[2]));
+    expect(rows[0]!.sub).toEqual(latestSubmission(db, ids[2]!));
+    expect(listUnnotifiedSubmissions(db, 2).map((r) => r.sub.id)).toEqual([c, d]);
   });
 });
 

@@ -255,16 +255,13 @@ export function lastRealSubmissionAt(db: Db): Date | null {
   return row?.at ?? null;
 }
 
+/** Jobs whose LATEST submission has not been notified yet, by job id; one query (correlated max(id) subquery). */
 export function listUnnotifiedSubmissions(db: Db, limit: number): { job: JobRow; sub: SubmissionRow }[] {
-  const out: { job: JobRow; sub: SubmissionRow }[] = [];
-  const ids = db.selectDistinct({ jobId: submissions.jobId }).from(submissions).orderBy(asc(submissions.jobId)).all();
-  for (const { jobId } of ids) {
-    const sub = latestSubmission(db, jobId);
-    const job = getJob(db, jobId);
-    if (sub && job && !sub.notifiedAt) out.push({ job, sub });
-    if (out.length >= limit) break;
-  }
-  return out;
+  const latestId = sql`(select max(s2.id) from ${submissions} s2 where s2.job_id = ${submissions.jobId})`;
+  return db.select({ job: jobs, sub: submissions }).from(submissions)
+    .innerJoin(jobs, eq(jobs.id, submissions.jobId))
+    .where(and(isNull(submissions.notifiedAt), eq(submissions.id, latestId)))
+    .orderBy(asc(submissions.jobId)).limit(limit).all();
 }
 
 export function listJobsForFilling(db: Db, limit: number): JobRow[] {
