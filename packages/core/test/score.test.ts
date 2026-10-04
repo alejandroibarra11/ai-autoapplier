@@ -69,6 +69,7 @@ describe('evidenceText', () => {
   it('accepts the employer-written title but excludes synthetic header lines', () => {
     const text = evidenceText(makeJob({ title: 'Sr Full Stack Developer - ONLY MEXICO' }));
     expect(evidenceFound('Sr Full Stack Developer - ONLY MEXICO', text)).toBe(true);
+    expect(evidenceFound('Title: Sr Full Stack Developer - ONLY MEXICO', text)).toBe(true);
     expect(evidenceFound('Company: Acme', text)).toBe(false);
     expect(evidenceFound('Compensation: not stated', text)).toBe(false);
     expect(evidenceFound('Location: Remote - LATAM', text)).toBe(true);
@@ -80,6 +81,12 @@ describe('evidenceText', () => {
     expect(evidenceFound('no location restrictions listed', text)).toBe(false);
     expect(evidenceFound('We build LLM tools', text)).toBe(true);
     expect(jobContextText(job)).toContain('Board metadata: no location restrictions listed');
+  });
+});
+
+describe('buildScoringSystem contiguous quote rule', () => {
+  it('asks for one contiguous passage', () => {
+    expect(buildScoringSystem('p')).toContain('ONE contiguous passage');
   });
 });
 
