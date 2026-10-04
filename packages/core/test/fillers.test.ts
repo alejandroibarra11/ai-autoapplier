@@ -45,6 +45,18 @@ describe('greenhouseFiller', () => {
     await page.close();
   }, 60_000);
 
+  it('restores a wiped textarea with its line breaks', async () => {
+    posted.length = 0;
+    const page = await open('greenhouse-form.html', '?cleartextarea');
+    const multi = 'Line one\nLine two\n\nLine four';
+    const r = await greenhouseFiller.fill(page, { ...plan, entries: plan.entries.map((x) => (x.fieldId === 'question_3' ? { ...x, value: multi } : x)) });
+    expect(await page.inputValue('#question_3')).toBe(multi);
+    expect(r.filled).toContain('question_3');
+    expect(r.failed).toEqual([]);
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 60_000);
+
   it('fails the first name when it keeps being wiped, never submitting', async () => {
     posted.length = 0;
     const page = await open('greenhouse-form.html', '?clearname=always');

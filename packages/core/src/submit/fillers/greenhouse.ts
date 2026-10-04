@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 import type { Page } from 'playwright';
 import type { AtsFiller, FillEntry, FillPlan, FilledReport, SubmitOutcome } from '../types';
-import { chooseCombobox, chooseNative, clickChoiceButton, fillText, oneLine, setFile } from '../dom';
+import { chooseCombobox, chooseNative, clickChoiceButton, fillText, setFile } from '../dom';
 import { runFill, runSubmit } from './common';
 
 const IDENTITY_TEXT: Record<string, string> = {
@@ -124,8 +124,8 @@ export const greenhouseFiller: AtsFiller = {
       await page.waitForTimeout(500);
       for (const w of written) {
         if (!r.filled.includes(w.fieldId) || (await read(w.selector)) === w.want) continue;
-        // Wiped after we typed it: re-type once with the same sanitization (fill only, no key presses) and re-read.
-        await page.locator(w.selector).first().fill(oneLine(w.value), { timeout: 5000 }).catch(() => {});
+        // Wiped after we typed it: re-type once via fillText and re-read.
+        await fillText(page, w.selector, w.value); // keeps textarea newlines, oneLine for inputs, no key presses
         await page.waitForTimeout(500);
         if ((await read(w.selector)) !== w.want) { r.filled.splice(r.filled.indexOf(w.fieldId), 1); r.failed.push(w.fieldId); }
       }

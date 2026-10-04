@@ -36,6 +36,12 @@
     // Like Greenhouse's resume parser clobbering the name: ?clearname clears once 700 ms after the chip appears.
     if (q.includes('clearname') && !q.includes('clearname=always')) setTimeout(() => { document.getElementById('first_name').value = ''; }, 700);
   });
+  // ?cleartextarea: wipe the Why-us textarea once, 100 ms after it is first typed into.
+  if (q.includes('cleartextarea')) document.getElementById('question_3').addEventListener('input', () => {
+    if (window.__tw) return;
+    window.__tw = true;
+    setTimeout(() => { document.getElementById('question_3').value = ''; }, 100);
+  });
   // ?clearname=always: every input into First Name starts (or extends) a 3 s window in which it is wiped every 100 ms, so a re-type is wiped again.
   if (q.includes('clearname=always')) {
     let until = 0, timer = null;
