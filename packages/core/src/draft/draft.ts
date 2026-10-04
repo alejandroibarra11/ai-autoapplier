@@ -7,6 +7,7 @@ import type { CvSelection, DraftAnswer, FormQuestion } from '../apply/types';
 import { LLMParseError, type LLMProvider, type LLMUsage } from '../llm/provider';
 import { jobContextText } from '../score/prompt';
 import { DraftLLMSchema, type DraftLLMOutput } from './schema';
+import { TECH_TERMS } from './tech-terms';
 import { buildDraftSystem, buildDraftUser } from './prompt';
 
 export const MAX_COVER_WORDS = 260;
@@ -21,10 +22,28 @@ export interface DraftResult { coverLetter: string; answers: DraftAnswer[]; cvSe
 
 const isChoice = (q: FormQuestion) => q.type === 'select' || q.type === 'multiselect' || (q.type === 'boolean' && !!q.options);
 
-function validChoice(q: FormQuestion, answer: string): boolean {
-  const opts = (q.options ?? []).map((o) => o.toLowerCase());
+/** Canonical option text for a generated choice answer, or null when any part is not an option. */
+function canonicalChoice(q: FormQuestion, answer: string): string | null {
+  const opts = q.options ?? [];
   const parts = q.type === 'multiselect' ? answer.split(';').map((s) => s.trim()) : [answer.trim()];
-  return parts.length > 0 && parts.every((p) => opts.includes(p.toLowerCase()));
+  const mapped = parts.map((p) => opts.find((o) => o.toLowerCase() === p.toLowerCase()));
+  if (mapped.length === 0 || mapped.some((m) => m === undefined)) return null;
+  return mapped.join('; ');
+}
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const termRegex = (t: string, flags = 'i') => new RegExp(`(?<![a-zA-Z0-9+#.])${escapeRegExp(t)}(?![a-zA-Z0-9+#])`, flags);
+
+function profileProse(p: Profile): string {
+  return [p.headline, p.summary, ...p.experience.flatMap((e) => e.highlights), ...p.projects.flatMap((pr) => [pr.name, pr.summary])].join('\n');
+}
+
+/** True when the term is a profile skill/stack entry or appears as a whole word in the profile prose. */
+export function profileSupports(profile: Profile, term: string): boolean {
+  const t = term.trim().toLowerCase();
+  if (!t) return true;
+  if (profileVocabulary(profile).includes(t)) return true;
+  return termRegex(t).test(profileProse(profile));
 }
 
 async function callModel(ctx: DraftContext, toGenerate: FormQuestion[], fixed: DraftAnswer[]): Promise<DraftLLMOutput> {
@@ -70,16 +89,25 @@ export async function draftJob(ctx: DraftContext): Promise<DraftResult> {
   for (const q of toGenerate) {
     const a = out.answers.find((x) => x.questionId === q.id)?.answer?.trim() ?? '';
     if (!a) { if (q.required) flags.push(`missing answer: ${q.label}`); continue; }
-    if (isChoice(q) && !validChoice(q, a)) flags.push(`invalid option for: ${q.label}`);
-    generated.push({ questionId: q.id, label: q.label, answer: a, source: 'generated' });
+    let answer = a;
+    if (isChoice(q)) {
+      const canon = canonicalChoice(q, a);
+      if (canon === null) flags.push(`invalid option for: ${q.label}`); else answer = canon;
+    }
+    generated.push({ questionId: q.id, label: q.label, answer, source: 'generated' });
   }
 
-  const vocab = profileVocabulary(ctx.profile);
-  const profileText = JSON.stringify(ctx.profile).toLowerCase();
-  for (const s of out.claimedSkills) {
-    const t = s.trim().toLowerCase();
-    if (t && !vocab.includes(t) && !profileText.includes(t)) flags.push(`unverified claim: ${s.trim()}`);
-  }
+  const flagged = new Set<string>();
+  const checkClaim = (term: string) => {
+    const t = term.trim();
+    if (!t || flagged.has(t.toLowerCase()) || profileSupports(ctx.profile, t)) return;
+    flagged.add(t.toLowerCase());
+    flags.push(`unverified claim: ${t}`);
+  };
+  out.claimedSkills.forEach(checkClaim);
+  // Case-sensitive so common words ("go", "ml") in ordinary prose do not trip the scan.
+  const prose = [out.coverLetter, ...generated.map((g) => g.answer)].join('\n');
+  for (const term of TECH_TERMS) if (termRegex(term, '').test(prose)) checkClaim(term);
 
   const bullets = profileBullets(ctx.profile);
   const known = new Set(bullets.map((b) => b.id));
