@@ -33,3 +33,19 @@ describe('checkSubmitMode', () => {
     expect(getJob(db, id)!.status).toBe('needs_manual');
   });
 });
+
+import { parseRenderedDry } from '../src/submit/mode';
+import { isAllowedHost } from '../src/submit/host-guard';
+describe('parseRenderedDry', () => {
+  it('maps 1/0 and rejects everything else', () => {
+    expect(parseRenderedDry('1')).toBe(true);
+    expect(parseRenderedDry('0')).toBe(false);
+    for (const v of [null, undefined, '', 'true', 'x', 1, 0]) expect(parseRenderedDry(v)).toBeNull();
+  });
+});
+describe('isAllowedHost', () => {
+  it('allows only loopback hosts on the dashboard ports', () => {
+    for (const h of ['127.0.0.1:3100', 'localhost:3100', '[::1]:3100', '127.0.0.1:3101', 'localhost:3101', '[::1]:3101']) expect(isAllowedHost(h)).toBe(true);
+    for (const h of [null, '', 'evil.com:3101', 'evil.com', '127.0.0.1:3102', 'localhost.evil.com:3100', '127.0.0.1', 'localhost']) expect(isAllowedHost(h)).toBe(false);
+  });
+});

@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   applyDraftEdits, checkSubmitMode, claimStatus, findRoot, getJob, isBlockingFlag, latestDraft, latestSubmission, loadAnswers, loadConfig,
-  loadProfile, openBrowser, runSubmit, setStatus, updateDraftContent, updateSubmission, type PageFactory,
+  loadProfile, openBrowser, parseRenderedDry, runSubmit, setStatus, updateDraftContent, updateSubmission, type PageFactory,
 } from '@autoapplier/core';
 import { getWriteDb } from '../../../lib/db';
 
@@ -65,8 +65,9 @@ const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
  */
 export async function submitApplication(_prev: string | null, formData: FormData): Promise<string> {
   const jobId = Number(formData.get('jobId'));
-  const renderedDry = formData.get('renderedDry') === '1';
+  const renderedDry = parseRenderedDry(formData.get('renderedDry'));
   if (!Number.isSafeInteger(jobId)) return 'Bad job id';
+  if (renderedDry === null) return 'Bad request: page mode unknown — reload the page';
   try {
     const root = findRoot();
     const cfg = loadConfig(join(root, 'config.yaml'));
@@ -87,7 +88,7 @@ export async function submitApplication(_prev: string | null, formData: FormData
       done(jobId);
       switch (r.status) {
         case 'refused': return `Refused: ${r.reason}`;
-        case 'dry_run': return 'Dry run: nothing was sent. Set submit.dryRun to false in config.yaml and restart the worker to submit for real.';
+        case 'dry_run': return 'Dry run: nothing was sent. Set submit.dryRun to false in config.yaml to submit for real.';
         case 'applied': return 'Applied: the confirmation was seen.';
         case 'submit_failed': return `Submit failed: ${r.reason ?? 'unknown'}. Check your email first: it may have been sent.`;
         default: return `Finish manually: ${r.reason ?? 'unknown'}`;

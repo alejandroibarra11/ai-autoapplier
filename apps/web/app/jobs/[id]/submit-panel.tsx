@@ -10,7 +10,7 @@ const RESULT_TEXT: Record<string, string> = {
 export function SubmitPanel({ job, sub, dryRun }: { job: JobRow; sub: SubmissionRow | undefined; dryRun: boolean }) {
   if (!sub) return null;
   const awaiting = job.status === 'awaiting_submit';
-  const finished = sub.result === 'submitted' || sub.result === 'failed' || sub.result === 'blocked' || sub.result === 'cancelled';
+  const finished = sub.result === 'submitted' || sub.result === 'dry_run' || sub.result === 'failed' || sub.result === 'blocked' || sub.result === 'cancelled';
   return (
     <div className="card">
       <h3>Submission</h3>

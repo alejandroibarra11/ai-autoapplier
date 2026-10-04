@@ -15,3 +15,8 @@ export function checkSubmitMode(db: Db, jobId: number, renderedDry: boolean, cur
   }
   return { proceed: false, message: 'Dry-run mode changed since this page was shown — nothing was submitted. The worker will re-fill and send a fresh screenshot; reload in a minute.' };
 }
+
+/** Parses the hidden renderedDry form field: '1' → dry, '0' → real, anything else (missing/forged) → null (refuse). */
+export function parseRenderedDry(v: unknown): boolean | null {
+  return v === '1' ? true : v === '0' ? false : null;
+}
