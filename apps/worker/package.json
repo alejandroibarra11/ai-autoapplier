@@ -1,0 +1,23 @@
+{
+  "name": "@autoapplier/worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "once": "tsx src/cli.ts once",
+    "cli": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  },
+  "dependencies": {
+    "@autoapplier/core": "workspace:*",
+    "grammy": "^1.46.0",
+    "node-cron": "^4.6.0"
+  }
+}
