@@ -1,0 +1,77 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Acme - Engineer</title></head>
+<body class="application">
+<form id="application-form" enctype="multipart/form-data" method="POST" action="/apply">
+<ul>
+  <li class="application-question resume"><label><div class="application-label">Resume/CV <span class="required">✱</span></div><div class="application-field"><a href="#" class="postings-btn"><span class="filename"></span><span class="default-label">ATTACH RESUME/CV</span><input class="application-file-input invisible-resume-upload" id="resume-upload-input" name="resume" tabindex="-1" type="file"></a><span class="resume-upload-working" style="display:none">Analyzing resume...</span><span class="resume-upload-success" style="display:none">Success!</span><span class="resume-upload-failure" style="display:none">Couldn't auto-read resume.</span><span class="resume-upload-oversize" style="display:none"><p class="error-message">File exceeds the maximum upload size</p></span></div></label></li>
+  <li class="application-question"><label><div class="application-label">Full name<span class="required">✱</span></div><div class="application-field"><input type="text" name="name" required></div></label></li>
+  <li class="application-question"><label><div class="application-label">Email<span class="required">✱</span></div><div class="application-field"><input name="email" type="email" required></div></label></li>
+  <li class="application-question"><label><div class="application-label">Phone </div><div class="application-field"><input type="text" name="phone"></div></label></li>
+  <li class="application-question"><label><div class="application-label">Current location </div><div class="application-field"><input class="location-input" id="location-input" type="text" maxlength="100" name="location"><input id="selected-location" type="hidden" name="selectedLocation"><div class="dropdown-container"><div class="dropdown-results" data-options="Guadalajara, Jalisco, MEX|Guadalajara, Castilla-La Mancha, ESP|Mexico City, MEX"></div></div></div></label></li>
+  <li class="application-question"><label><div class="application-label">Current company </div><div class="application-field"><input type="text" name="org"></div></label></li>
+  <li class="application-question"><label><div class="application-label">LinkedIn Profile URL</div><div class="application-field"><input type="text" name="urls[LinkedIn Profile]"></div></label></li>
+  <li class="application-question"><label><div class="application-label">Personal Website or Portfolio URL</div><div class="application-field"><input type="text" name="urls[Personal Website or Portfolio]"></div></label></li>
+  <li class="application-question"><label><div class="application-label">Which website did you hear about us on?</div><div class="application-field"><input type="text" name="urls[Which website did you hear about us on?]"></div></label></li>
+  <li class="application-question"><label><div class="application-label">Github URL</div><div class="application-field"><input type="text" name="urls[Github]"></div></label></li>
+  <li class="application-question"><label><div class="application-label">Additional information</div><div class="application-field"><textarea name="comments"></textarea></div></label></li>
+  <li class="application-question custom-question"><div><div class="application-label"><div class="text">Tell us about yourself<span class="required">✱</span></div></div><div class="application-field"><textarea class="card-field-input" name="cards[c1][field0]" required="required"></textarea></div></div></li>
+  <li class="application-question custom-question"><div><div class="application-label"><div class="text">Education<span class="required">✱</span></div></div><div class="application-field"><ul data-qa="multiple-choice">
+    <li><label><input type="radio" name="cards[c1][field1]" value="Associate's degree" required="required"><span class="application-answer-alternative">Associate's degree</span></label></li>
+    <li><label><input type="radio" name="cards[c1][field1]" value="Bachelor's degree" required="required"><span class="application-answer-alternative">Bachelor's degree</span></label></li>
+    <li><label><input type="radio" name="cards[c1][field1]" value="Bachelor's degree or above" required="required"><span class="application-answer-alternative">Bachelor's degree or above</span></label></li>
+  </ul></div></div></li>
+  <li class="application-question custom-question"><div><div class="application-label"><div class="text">Which regions?</div></div><div class="application-field"><ul>
+    <li><label><input type="checkbox" name="cards[c1][field2]" value="EU"><span>EU</span></label></li>
+    <li><label><input type="checkbox" name="cards[c1][field2]" value="LATAM"><span>LATAM</span></label></li>
+    <li><label><input type="checkbox" name="cards[c1][field2]" value="US"><span>US</span></label></li>
+  </ul></div></div></li>
+  <li class="application-question custom-question"><div><div class="application-label"><div class="text">Pick one</div></div><div class="application-field"><select name="cards[c1][field3]"><option value="">Select...</option><option>Yes</option><option>Yes, maybe</option><option>No</option></select></div></div></li>
+  <li class="application-question custom-question"><div><div class="application-label"><div class="text">Nav trap</div></div><div class="application-field"><input type="text" name="cards[c1][nav]" data-nav="1"></div></div></li>
+  <li class="application-question"><div class="application-label">Gender</div><div class="application-field"><select name="eeo[gender]"><option value="">Select...</option><option>Male</option><option>Female</option><option>Decline to self-identify</option></select></div></li>
+</ul>
+<input type="hidden" name="accountId" value="abc">
+<button id="btn-submit" type="button" class="postings-btn template-btn-submit" data-qa="btn-submit">Submit application</button>
+</form>
+<script>
+(() => {
+  const q = location.search;
+  if (q.includes('norequired')) document.querySelectorAll('[required]').forEach((el) => el.removeAttribute('required'));
+  if (q.includes('errorboundary')) document.body.insertAdjacentHTML('afterbegin', '<div class="error-message">Something went wrong loading a widget</div>');
+  document.querySelector('[data-nav]').addEventListener('input', () => { location.assign('/acme/jobs/2'); });
+  const rl = document.getElementById('resume-upload-input');
+  rl.addEventListener('change', () => {
+    document.querySelector('.filename').textContent = rl.files[0].name;
+    const w = document.querySelector('.resume-upload-working'); w.style.display = 'inline';
+    // like Lever, the parser finishes later and may autofill the name
+    setTimeout(() => {
+      w.style.display = 'none';
+      const show = (c) => { document.querySelector('.' + c).style.display = 'inline'; };
+      if (q.includes('uploadfail')) show('resume-upload-failure'); else if (q.includes('oversize')) show('resume-upload-oversize'); else show('resume-upload-success');
+      const n = document.querySelector('[name=name]'); if (!n.value) n.value = 'Parsed Name';
+    }, 400);
+    // a slow parser result that overwrites what was typed in the meantime
+    // (fires 1 s after the field is typed into, whenever that happens, so the test does not depend on upload timing)
+    if (q.includes('overwrite')) document.querySelector('[name=name]').addEventListener('input', () => setTimeout(() => { document.querySelector('[name=name]').value = 'Parsed Name'; }, 1000), { once: true });
+  });
+  const li = document.getElementById('location-input');
+  const box = document.querySelector('.dropdown-results');
+  li.addEventListener('input', () => {
+    box.innerHTML = '';
+    document.getElementById('selected-location').value = '';
+    for (const o of box.dataset.options.split('|').filter((o) => o.toLowerCase().includes(li.value.toLowerCase()))) {
+      const d = document.createElement('div'); d.className = 'break-word dropdown-location'; d.textContent = o;
+      d.addEventListener('click', () => { li.value = o; document.getElementById('selected-location').value = JSON.stringify({ name: o }); box.innerHTML = ''; });
+      box.appendChild(d);
+    }
+  });
+  const form = document.getElementById('application-form');
+  document.getElementById('btn-submit').addEventListener('click', async () => {
+    await fetch('/apply', { method: 'POST', body: new FormData(form) });
+    if (q.includes('errorboundary')) form.replaceWith(Object.assign(document.createElement('h1'), { textContent: 'Application submitted' }));
+    else document.body.innerHTML = '<h1>Application submitted</h1>';
+    history.pushState({}, '', '/acme/jobs/1/thanks');
+  });
+  form.addEventListener('submit', (ev) => ev.preventDefault()); // an Enter key must never post
+})();
+</script>
+</body></html>

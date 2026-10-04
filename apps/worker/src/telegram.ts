@@ -1,5 +1,6 @@
 import { Bot, GrammyError, InlineKeyboard } from 'grammy';
 import { handleDraftAction } from './drafts';
+import { handleCancel, markAppliedKeyboard, parseSubmitCallback, type SubmitTapResult } from './submissions';
 import {
   formatComp, getJob, latestScore, listUnnotified, markNotified, setStatus,
   type Db, type JobRow, type ScorePayload,
@@ -104,11 +105,37 @@ export async function notifyPending(
   return sent;
 }
 
-export function createBot(token: string, chatId: string, db: Db, onReady?: (jobId: number) => Promise<void>): Bot {
+export interface BotOptions {
+  /** 🚀 Submit tap handler (see createSubmitTaps). Without it Submit taps are refused. */
+  submitTap?: (fromChatId: string | number | undefined, jobId: number, cardDry: boolean | null) => SubmitTapResult;
+  /** Runs after a successful ✋ Cancel (main: sends the copy-paste messages). */
+  onCancelled?: (jobId: number) => Promise<void>;
+}
+
+export function createBot(token: string, chatId: string, db: Db, onReady?: (jobId: number) => Promise<void>, opts: BotOptions = {}): Bot {
   const bot = new Bot(token);
   bot.command('start', (ctx) => ctx.reply(`Chat id: ${ctx.chat.id}\nPut it in .env as TELEGRAM_CHAT_ID.`));
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data;
+    const sc = parseSubmitCallback(data);
+    if (sc?.action === 'cancel') {
+      const r = handleCancel(db, chatId, ctx.chat?.id, sc.jobId);
+      await ctx.answerCallbackQuery({ text: r.text });
+      if (r.ok) await ctx.editMessageReplyMarkup({ reply_markup: markAppliedKeyboard(sc.jobId) }).catch(() => {});
+      if (r.ok && opts.onCancelled) await opts.onCancelled(sc.jobId).catch((e) => console.error('[telegram] copy-paste after cancel failed', e));
+      return;
+    }
+    if (sc?.action === 'submit') {
+      const r = opts.submitTap ? opts.submitTap(ctx.chat?.id, sc.jobId, sc.cardDry) : { ok: false, text: 'Submitting is not available' };
+      // Answer first (Telegram expects it quickly), drop the buttons (press-once), then queue the submit behind the
+      // browser mutex without blocking the bot's update loop; the result arrives as a new message.
+      await ctx.answerCallbackQuery({ text: r.text }).catch(() => {});
+      if (!r.ok) return;
+      await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() }).catch(() => {});
+      // No start = the card's dry-run mode is stale: the job went back to ready_to_apply and the fill loop re-fills it.
+      if (r.start) void r.start();
+      return;
+    }
     if (/^(ap|sd|ma):/.test(data)) {
       const r = handleDraftAction(db, chatId, ctx.chat?.id, data);
       await ctx.answerCallbackQuery({ text: r.text });

@@ -43,12 +43,12 @@ describe('normalizeFormFields', () => {
       { name: 'cards[abc][field0]', label: 'Are you authorized to work in the US?', tag: 'select', required: true, options: ['', 'Yes', 'No'] },
       { name: 'consent', label: 'I agree', tag: 'input', inputType: 'checkbox', required: true },
     ]);
-    expect(qs.map((q) => q.type)).toEqual(['identity', 'identity', 'identity', 'text', 'textarea', 'select', 'boolean']);
+    expect(qs.map((q) => q.type)).toEqual(['identity', 'identity', 'identity', 'identity', 'identity', 'select', 'boolean']) // Lever system inputs urls[...] and comments are identity;
     expect(qs[5]!.options).toEqual(['Yes', 'No']);
   });
   it('does not swallow real questions as identity', () => {
     const qs = normalizeFormFields([
-      { name: 'location', label: 'Location', tag: 'input', inputType: 'text', required: false },
+      { name: 'home_city', label: 'Location', tag: 'input', inputType: 'text', required: false }, // Lever's exact `location` name is identity now
       { name: 'employer', label: 'Name of your current employer', tag: 'input', inputType: 'text', required: false },
       { name: 'optin', label: 'Email me about future roles', tag: 'input', inputType: 'checkbox', required: false },
       { name: 'referrer_email', label: "Referrer's email", tag: 'input', inputType: 'email', required: false },

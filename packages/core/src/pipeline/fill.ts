@@ -1,0 +1,197 @@
+import { join } from 'node:path';
+import type { Page } from 'playwright';
+import type { Db } from '../db/client';
+import type { Config } from '../config';
+import type { Profile } from '../profile';
+import type { Answers } from '../answers';
+import type { ApplyTarget, DraftAnswer } from '../apply/types';
+import { targetFromUrl } from '../apply/resolve';
+import {
+  type JobRow, appendDraftAnswers, claimStatus, getJob, insertSubmission, latestDraft, latestSubmission, listJobsForFilling, listStaleByStatus, recordUsage, setStatus,
+  spendSince, updateSubmission,
+} from '../db/repo';
+import { costUsd, type LLMProvider } from '../llm/provider';
+import { answerMissing, isBlockingFlag } from '../draft/draft';
+import { buildFillPlan } from '../submit/plan';
+import { verifyFill } from '../submit/verify';
+import { detectCaptchaChallenge, detectLoginWall } from '../submit/detect';
+import { takeShot } from '../submit/screenshot';
+import { fillerFor } from '../submit/fillers';
+import { bodyText } from '../submit/fillers/common';
+import type { AtsFiller, FilledReport, FillPlan } from '../submit/types';
+import { withTimeout } from './draft';
+
+export interface PageFactory { newPage(): Promise<Page> }
+export interface FillDeps {
+  db: Db; cfg: Config; provider: LLMProvider; profile: Profile; answers: Answers; shotsDir: string;
+  pages: PageFactory; now?: Date; limit?: number; onlyJobId?: number;
+  /** Timeout for the fill-time LLM step (default FILL_LLM_TIMEOUT_MS), separate from submit.fillTimeoutMs. */
+  llmTimeoutMs?: number;
+  /** Skip the stale filling/submitting sweep (the CLI: another process may own those jobs). Default false. */
+  skipStaleSweep?: boolean;
+  /** Test seam: runs after a job is picked and before it is claimed. */
+  hooks?: { beforeClaim?: () => void | Promise<void> };
+}
+export interface FillRunResult { filled: number; manual: number }
+
+const STALE_MS = 15 * 60_000;
+export const STALE_SUBMIT_NOTE = 'worker restarted during submit — check your email before retrying';
+const EMPTY_PLAN: FillPlan = { entries: [], missingRequired: [], manualReasons: [] };
+
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 500);
+export const shotPath = (dir: string, jobId: number, kind: string) => join(dir, `${jobId}-${kind}-${Date.now()}.png`);
+
+/** Screenshot that never throws (null when the page is gone or slow). */
+export async function safeShot(page: Page | null, path: string): Promise<string | null> {
+  if (!page || page.isClosed()) return null;
+  try { return await withTimeout(takeShot(page, path), 15_000, 'screenshot'); } catch { return null; }
+}
+
+/** Opens the form; null when it loaded, else the reason it cannot be filled. */
+export async function openForm(page: Page, url: string): Promise<string | null> {
+  const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  if (res && res.status() >= 400) return `form page returned HTTP ${res.status()}`;
+  await page.waitForLoadState('load', { timeout: 10_000 }).catch(() => {});
+  const text = `${await page.title().catch(() => '')}\n${await bodyText(page)}`;
+  if (detectLoginWall(page.url(), text)) return 'login required to apply';
+  if (await detectCaptchaChallenge(page)) return 'captcha challenge on the form page';
+  return null;
+}
+
+/** The ATS target for a job's resolved apply URL, or null when it lacks the board token / job id the filler needs. */
+export function jobTarget(job: Pick<JobRow, 'resolvedApplyUrl' | 'resolvedKind'>): ApplyTarget | null {
+  if (!job.resolvedApplyUrl) return null;
+  let t: ApplyTarget | null;
+  try { t = targetFromUrl(job.resolvedApplyUrl); } catch { return null; }
+  if (!t || t.kind !== job.resolvedKind || !t.atsToken || !t.atsJobId) return null;
+  return t;
+}
+
+/**
+ * Stale `filling` → `ready_to_apply` (retried). Stale `submitting` → `submit_failed`, never back to awaiting_submit:
+ * the click may have happened. Its submission row keeps `submittedAt` so it still counts against the limits, and its
+ * `notifiedAt` is cleared so the worker tells the user once (the fill card was already notified).
+ */
+export function resetStaleFillSubmit(db: Db, olderThan: Date, now = new Date()): void {
+  for (const j of listStaleByStatus(db, 'filling', olderThan)) setStatus(db, j.id, 'ready_to_apply', 'stale filling reset', {}, now);
+  for (const j of listStaleByStatus(db, 'submitting', olderThan)) {
+    setStatus(db, j.id, 'submit_failed', STALE_SUBMIT_NOTE, {}, now);
+    const sub = latestSubmission(db, j.id);
+    if (sub && (sub.result === 'filled' || sub.result === 'dry_run')) updateSubmission(db, sub.id, { result: 'failed', evidence: STALE_SUBMIT_NOTE, notifiedAt: null });
+  }
+}
+
+interface FillCtx { page: Page | null; plan: FillPlan; done: boolean }
+type Outcome =
+  | { kind: 'filled'; plan: FillPlan; shot: string | null; report: FilledReport }
+  | { kind: 'manual'; plan: FillPlan; reasons: string[]; shot: string | null; report?: FilledReport };
+type Prepared = { kind: 'ready'; plan: FillPlan; target: ApplyTarget } | Extract<Outcome, { kind: 'manual' }>;
+
+export const FILL_LLM_TIMEOUT_MS = 90_000;
+export const SPEND_CAP_REASON = 'daily AI spend cap reached';
+
+/** Draft + fill LLM spend since the start of the UTC day of `now`. */
+function draftingSpendToday(db: Db, now: Date): number {
+  const dayStart = new Date(now);
+  dayStart.setUTCHours(0, 0, 0, 0);
+  return spendSince(db, dayStart, 'draft') + spendSince(db, dayStart, 'fill');
+}
+
+/**
+ * Builds the plan. Required questions the draft lacks are answered by the LLM (answers only, own timeout, before any
+ * page is opened, subject to the daily drafting spend cap) and saved into the draft marked `fillTime`, so a re-fill
+ * reuses them. Writes nothing to the job/submission tables.
+ */
+async function prepareFill(d: FillDeps, job: JobRow, now: Date, ctx: FillCtx): Promise<Prepared> {
+  const manual = (reasons: string[]): Prepared => ({ kind: 'manual', plan: ctx.plan, reasons, shot: null });
+  const target = jobTarget(job);
+  if (!target) return manual([`cannot build the ${job.resolvedKind} form URL from ${job.resolvedApplyUrl ?? '(none)'}`]);
+  const draft = latestDraft(d.db, job.id);
+  if (!draft) return manual(['no draft']);
+
+  const input = { questions: draft.questions, answers: d.answers, profile: d.profile };
+  let plan = buildFillPlan({ ...input, draft });
+  ctx.plan = plan;
+  if (plan.missingRequired.length) {
+    if (draftingSpendToday(d.db, now) >= d.cfg.drafting.dailySpendCapUsd) return manual([SPEND_CAP_REASON]);
+    const ids = new Set(plan.missingRequired.map((m) => m.fieldId));
+    const llmMs = d.llmTimeoutMs ?? FILL_LLM_TIMEOUT_MS;
+    const res = await withTimeout(answerMissing({
+      provider: d.provider, model: d.cfg.drafting.model, effort: d.cfg.drafting.effort,
+      profile: d.profile, answers: d.answers, job, questions: draft.questions.filter((q) => ids.has(q.id)),
+      onUsage: (u) => recordUsage(d.db, { jobId: job.id, stage: 'fill', ...u, costUsd: costUsd(d.cfg.pricing, u) }, now),
+    }), llmMs, 'fill-time answers');
+    const extra: DraftAnswer[] = res.answers.filter((a) => ids.has(a.questionId)).map((a) => ({ ...a, source: 'generated', fillTime: true }));
+    const withExtra = [...draft.answers.filter((a) => !ids.has(a.questionId)), ...extra];
+    plan = buildFillPlan({ ...input, draft: { ...draft, answers: withExtra } });
+    ctx.plan = plan;
+    const blocking = res.flags.filter(isBlockingFlag);
+    if (blocking.length) return manual(blocking);
+    // Only clean answers are kept: a blocked one must not be filled silently by a later re-fill.
+    appendDraftAnswers(d.db, draft.id, extra, now);
+  }
+  const reasons = [...plan.manualReasons, ...plan.missingRequired.map((m) => `missing answer: ${m.label}`)];
+  if (reasons.length) return manual(reasons);
+  return { kind: 'ready', plan, target };
+}
+
+/** Opens the form and fills it from `plan` (the browser step; timed by the caller with submit.fillTimeoutMs). */
+async function browserFill(d: FillDeps, job: JobRow, filler: AtsFiller, target: ApplyTarget, plan: FillPlan, ctx: FillCtx): Promise<Outcome> {
+  const manual = (reasons: string[], shot: string | null = null, report?: FilledReport): Outcome => ({ kind: 'manual', plan, reasons, shot, report });
+  const page = await d.pages.newPage();
+  if (ctx.done) { await page.close().catch(() => {}); throw new Error('fill abandoned'); }
+  ctx.page = page;
+  const blocked = await openForm(page, filler.formUrl(target));
+  if (blocked) return manual([blocked], await safeShot(page, shotPath(d.shotsDir, job.id, 'fill')));
+  const report = await filler.fill(page, plan);
+  const shot = await safeShot(page, shotPath(d.shotsDir, job.id, 'fill'));
+  const mismatches = verifyFill(plan, report);
+  if (mismatches.length) return manual(mismatches, shot, report);
+  if (!shot) return manual(['could not take the fill screenshot'], null, report);
+  return { kind: 'filled', plan, shot, report };
+}
+
+export async function runFill(d: FillDeps): Promise<FillRunResult> {
+  const { db } = d;
+  const now = d.now ?? new Date();
+  if (!d.skipStaleSweep) resetStaleFillSubmit(db, new Date(now.getTime() - STALE_MS), now);
+  const res: FillRunResult = { filled: 0, manual: 0 };
+  const queue = d.onlyJobId === undefined
+    ? listJobsForFilling(db, d.limit ?? 3)
+    : [getJob(db, d.onlyJobId)].filter((j): j is JobRow => !!j && j.status === 'ready_to_apply' && !!fillerFor(j.resolvedKind ?? ''));
+
+  for (const job of queue) {
+    const filler = fillerFor(job.resolvedKind ?? '');
+    if (!filler) continue;
+    await d.hooks?.beforeClaim?.();
+    // Atomic claim: a concurrent runFill (or a user action) that changed the job first wins; skip it then.
+    if (!claimStatus(db, job.id, 'ready_to_apply', 'filling', null, now)) continue;
+    const ctx: FillCtx = { page: null, plan: EMPTY_PLAN, done: false };
+    let out: Outcome;
+    try {
+      // The LLM step (own timeout) runs before any page is opened; only the browser step uses fillTimeoutMs.
+      const prep = await prepareFill(d, job, now, ctx);
+      out = prep.kind === 'manual' ? prep : await withTimeout(browserFill(d, job, filler, prep.target, prep.plan, ctx), d.cfg.submit.fillTimeoutMs, 'fill');
+    } catch (e) {
+      out = { kind: 'manual', plan: ctx.plan, reasons: [errMsg(e)], shot: await safeShot(ctx.page, shotPath(d.shotsDir, job.id, 'fill')) };
+    } finally {
+      ctx.done = true; // a timed-out browserFill keeps running in the background: it must not open another page
+      await ctx.page?.close().catch(() => {});
+    }
+    try {
+      if (out.kind === 'filled') {
+        insertSubmission(db, { jobId: job.id, plan: out.plan, fillShot: out.shot, result: 'filled', report: out.report }, now);
+        setStatus(db, job.id, 'awaiting_submit', `${out.plan.entries.length} fields planned`, {}, now);
+        res.filled++;
+      } else {
+        const evidence = out.reasons.join('; ');
+        insertSubmission(db, { jobId: job.id, plan: out.plan, fillShot: out.shot, result: 'blocked', evidence, report: out.report ?? null }, now);
+        setStatus(db, job.id, 'needs_manual', evidence.slice(0, 500), {}, now);
+        res.manual++;
+      }
+    } catch (e) {
+      console.error(`[fill] could not record the result for job #${job.id}:`, errMsg(e));
+    }
+  }
+  return res;
+}

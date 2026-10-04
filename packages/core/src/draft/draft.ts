@@ -17,6 +17,8 @@ export const isBlockingFlag = (f: string): boolean => BLOCKING.some((p) => f.sta
 export interface DraftContext {
   provider: LLMProvider; model: string; effort: 'low' | 'medium' | 'high';
   profile: Profile; answers: Answers; job: JobRow; questions: FormQuestion[]; onUsage: (u: LLMUsage) => void;
+  /** Fill-time mode: only the answers are wanted (no cover letter / CV picks), smaller token budget. */
+  answersOnly?: boolean;
 }
 export interface DraftResult { coverLetter: string; answers: DraftAnswer[]; cvSelection: CvSelection; flags: string[] }
 
@@ -48,9 +50,9 @@ export function profileSupports(profile: Profile, term: string): boolean {
 
 async function callModel(ctx: DraftContext, toGenerate: FormQuestion[], fixed: DraftAnswer[]): Promise<DraftLLMOutput> {
   const req = {
-    system: buildDraftSystem(ctx.profile),
+    system: buildDraftSystem(ctx.profile, { answersOnly: ctx.answersOnly }),
     user: buildDraftUser(jobContextText(ctx.job), toGenerate, fixed),
-    schema: DraftLLMSchema, schemaName: 'application_draft', maxTokens: 16000, effort: ctx.effort,
+    schema: DraftLLMSchema, schemaName: 'application_draft', maxTokens: ctx.answersOnly ? 4000 : 16000, effort: ctx.effort,
   };
   let lastErr: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -106,8 +108,13 @@ export async function draftJob(ctx: DraftContext): Promise<DraftResult> {
   };
   out.claimedSkills.forEach(checkClaim);
   // Ambiguous terms (CASE_SENSITIVE_TERMS) match case-sensitively so ordinary words ("rust belt") do not trip the scan.
-  const prose = [out.coverLetter, ...generated.map((g) => g.answer)].join('\n');
+  // In answersOnly mode the cover letter is discarded, so only the answers are scanned.
+  const prose = [ctx.answersOnly ? '' : out.coverLetter, ...generated.map((g) => g.answer)].join('\n');
   for (const term of TECH_TERMS) if (termRegex(term, CASE_SENSITIVE_TERMS.has(term) ? '' : 'i').test(prose)) checkClaim(term);
+
+  const sortedAnswers = () => [...fixed, ...generated].sort((a, b) =>
+    ctx.questions.findIndex((q) => q.id === a.questionId) - ctx.questions.findIndex((q) => q.id === b.questionId));
+  if (ctx.answersOnly) return { coverLetter: '', answers: sortedAnswers(), cvSelection: { skillsOrder: [], bulletIds: [] }, flags };
 
   const bullets = profileBullets(ctx.profile);
   const known = new Set(bullets.map((b) => b.id));
@@ -122,7 +129,14 @@ export async function draftJob(ctx: DraftContext): Promise<DraftResult> {
   const words = out.coverLetter.trim().split(/\s+/).filter(Boolean).length;
   if (words > MAX_COVER_WORDS) flags.push(`cover letter too long: ${words} words`);
 
-  const answers = [...fixed, ...generated].sort((a, b) =>
-    ctx.questions.findIndex((q) => q.id === a.questionId) - ctx.questions.findIndex((q) => q.id === b.questionId));
-  return { coverLetter: out.coverLetter.trim(), answers, cvSelection: { skillsOrder, bulletIds }, flags };
+  return { coverLetter: out.coverLetter.trim(), answers: sortedAnswers(), cvSelection: { skillsOrder, bulletIds }, flags };
+}
+
+/**
+ * Fill-time answers for required questions the draft lacks: the same prompt, validation and truthfulness checks as
+ * draftJob (claimed skills, tech terms in the answers, options, missing required), but no cover letter or CV picks.
+ */
+export async function answerMissing(ctx: Omit<DraftContext, 'answersOnly'>): Promise<{ answers: DraftAnswer[]; flags: string[] }> {
+  const r = await draftJob({ ...ctx, answersOnly: true });
+  return { answers: r.answers, flags: r.flags };
 }

@@ -136,3 +136,9 @@ drafting:
 browser:
   headless: true
   timeoutMs: 20000
+
+submit:
+  dryRun: true
+  dailyLimit: 15
+  minSecondsBetween: 120
+  fillTimeoutMs: 60000

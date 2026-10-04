@@ -25,7 +25,11 @@ function isSensitive(f: RawField): boolean {
 const IDENTITY_NAME = /^(name|full_?name|first_?name|last_?name|email|e-?mail|phone|phone_?number|resume|cv|cover_?letter)$/i;
 const IDENTITY_LABEL = /^(full name|first name|last name|name|e-?mail( address)?|phone( number)?|resume|cv|resume\/cv|cover letter)$/i;
 
+// Lever's system inputs (not custom questions): structured location, current company, link fields, free-text comments.
+const LEVER_SYSTEM_NAME = /^(location|selectedLocation|org|comments)$|^urls\[/;
+
 function isIdentity(f: RawField): boolean {
+  if (LEVER_SYSTEM_NAME.test(f.name)) return true;
   const label = f.label.trim().replace(/[\s*:]+$/, '');
   return IDENTITY_NAME.test(f.name) || IDENTITY_LABEL.test(label);
 }

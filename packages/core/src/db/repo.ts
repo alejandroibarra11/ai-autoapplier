@@ -1,6 +1,7 @@
-import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm';
 import type { Db } from './client';
-import { companies, drafts, jobEvents, jobs, llmUsage, scores } from './schema';
+import { companies, drafts, jobEvents, jobs, llmUsage, scores, submissions } from './schema';
+import type { FillPlan, FilledReport, SubmissionResult } from '../submit/types';
 import type { DraftAnswer, FormQuestion, CvSelection, ResolvedKind } from '../apply/types';
 import type { Ats, JobStatus, NormalizedJob } from '../types';
 import type { ScorePayload } from '../score/schema';
@@ -154,6 +155,20 @@ export function updateDraftContent(db: Db, draftId: number, c: { coverLetter: st
   db.update(drafts).set({ ...c, editedByUser: true, updatedAt: now }).where(eq(drafts.id, draftId)).run();
 }
 
+/**
+ * Saves fill-time answers into the draft (replacing any answer to the same question) so a re-fill reuses them instead
+ * of calling the LLM again. Not a user edit: `editedByUser` is left alone.
+ */
+export function appendDraftAnswers(db: Db, draftId: number, add: DraftAnswer[], now = new Date()): void {
+  if (add.length === 0) return;
+  db.transaction((tx) => {
+    const cur = tx.select({ answers: drafts.answers }).from(drafts).where(eq(drafts.id, draftId)).get();
+    if (!cur) throw new Error(`draft ${draftId} not found`);
+    const ids = new Set(add.map((a) => a.questionId));
+    tx.update(drafts).set({ answers: [...cur.answers.filter((a) => !ids.has(a.questionId)), ...add], updatedAt: now }).where(eq(drafts.id, draftId)).run();
+  });
+}
+
 export function markDraftNotified(db: Db, draftId: number, now = new Date()): void {
   db.update(drafts).set({ notifiedAt: now }).where(eq(drafts.id, draftId)).run();
 }
@@ -196,4 +211,79 @@ export function listUnnotifiedDraftFailures(db: Db, limit: number): { job: JobRo
 
 export function markDraftFailureNotified(db: Db, jobId: number, now = new Date()): void {
   db.update(jobs).set({ draftFailureNotifiedAt: now }).where(eq(jobs.id, jobId)).run();
+}
+
+export type SubmissionRow = typeof submissions.$inferSelect;
+
+export function insertSubmission(
+  db: Db,
+  s: { jobId: number; plan: FillPlan; fillShot: string | null; result: SubmissionResult; evidence?: string | null; report?: FilledReport | null },
+  now = new Date(),
+): number {
+  return db.insert(submissions).values({
+    jobId: s.jobId, plan: s.plan, fillShot: s.fillShot, result: s.result, evidence: s.evidence ?? null, report: s.report ?? null, createdAt: now,
+  }).returning({ id: submissions.id }).get().id;
+}
+
+export function latestSubmission(db: Db, jobId: number): SubmissionRow | undefined {
+  return db.select().from(submissions).where(eq(submissions.jobId, jobId)).orderBy(desc(submissions.id)).limit(1).get();
+}
+
+export function getSubmission(db: Db, id: number): SubmissionRow | undefined {
+  return db.select().from(submissions).where(eq(submissions.id, id)).get();
+}
+
+export function updateSubmission(
+  db: Db,
+  id: number,
+  patch: Partial<{ submitShot: string | null; result: SubmissionResult; evidence: string | null; dryRun: boolean; submittedAt: Date | null; notifiedAt: Date | null }>,
+): void {
+  if (Object.keys(patch).length === 0) return;
+  db.update(submissions).set(patch).where(eq(submissions.id, id)).run();
+}
+
+const realSubmission = and(eq(submissions.dryRun, false), isNotNull(submissions.submittedAt));
+
+export function countRealSubmissionsSince(db: Db, since: Date): number {
+  return db.select({ n: sql<number>`count(*)` }).from(submissions)
+    .where(and(realSubmission, gte(submissions.submittedAt, since))).get()?.n ?? 0;
+}
+
+export function lastRealSubmissionAt(db: Db): Date | null {
+  const row = db.select({ at: submissions.submittedAt }).from(submissions)
+    .where(realSubmission).orderBy(desc(submissions.submittedAt)).limit(1).get();
+  return row?.at ?? null;
+}
+
+/** Jobs whose LATEST submission has not been notified yet, by job id; one query (correlated max(id) subquery). */
+export function listUnnotifiedSubmissions(db: Db, limit: number): { job: JobRow; sub: SubmissionRow }[] {
+  const latestId = sql`(select max(s2.id) from ${submissions} s2 where s2.job_id = ${submissions.jobId})`;
+  return db.select({ job: jobs, sub: submissions }).from(submissions)
+    .innerJoin(jobs, eq(jobs.id, submissions.jobId))
+    .where(and(isNull(submissions.notifiedAt), eq(submissions.id, latestId)))
+    .orderBy(asc(submissions.jobId)).limit(limit).all();
+}
+
+export function listJobsForFilling(db: Db, limit: number): JobRow[] {
+  return db.select().from(jobs)
+    .where(and(eq(jobs.status, 'ready_to_apply'), inArray(jobs.resolvedKind, ['greenhouse', 'lever', 'ashby'])))
+    .orderBy(asc(jobs.updatedAt), asc(jobs.id)).limit(limit).all();
+}
+
+/** Jobs that have sat in `status` since before `olderThan`. */
+export function listStaleByStatus(db: Db, status: JobStatus, olderThan: Date): JobRow[] {
+  return db.select().from(jobs).where(and(eq(jobs.status, status), lt(jobs.updatedAt, olderThan))).orderBy(asc(jobs.id)).all();
+}
+
+/**
+ * Atomic status transition: moves the job from `from` to `to` only if it is still in `from` (conditional UPDATE in an
+ * immediate transaction). Returns false when another caller got there first.
+ */
+export function claimStatus(db: Db, jobId: number, from: JobStatus, to: JobStatus, note: string | null = null, now = new Date()): boolean {
+  return db.transaction((tx) => {
+    const r = tx.update(jobs).set({ status: to, updatedAt: now }).where(and(eq(jobs.id, jobId), eq(jobs.status, from))).run();
+    if (r.changes !== 1) return false;
+    tx.insert(jobEvents).values({ jobId, fromStatus: from, toStatus: to, note, at: now }).run();
+    return true;
+  }, { behavior: 'immediate' });
 }
