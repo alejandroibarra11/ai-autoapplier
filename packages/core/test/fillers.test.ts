@@ -33,6 +33,41 @@ beforeAll(async () => { browser = await chromium.launch({ headless: true }); });
 afterAll(async () => { await browser?.close(); });
 
 describe('greenhouseFiller', () => {
+  it('re-types a first name wiped by the resume parser after the upload', async () => {
+    posted.length = 0;
+    const page = await open('greenhouse-form.html', '?clearname');
+    const r = await greenhouseFiller.fill(page, plan);
+    expect(await page.inputValue('#first_name')).toBe('Jane');
+    expect(r.filled).toContain('identity:firstName');
+    expect(r.failed).toEqual([]);
+    expect(r.requiredEmpty).toEqual([]);
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it('restores a wiped textarea with its line breaks', async () => {
+    posted.length = 0;
+    const page = await open('greenhouse-form.html', '?cleartextarea');
+    const multi = 'Line one\nLine two\n\nLine four';
+    const r = await greenhouseFiller.fill(page, { ...plan, entries: plan.entries.map((x) => (x.fieldId === 'question_3' ? { ...x, value: multi } : x)) });
+    expect(await page.inputValue('#question_3')).toBe(multi);
+    expect(r.filled).toContain('question_3');
+    expect(r.failed).toEqual([]);
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it('fails the first name when it keeps being wiped, never submitting', async () => {
+    posted.length = 0;
+    const page = await open('greenhouse-form.html', '?clearname=always');
+    const r = await greenhouseFiller.fill(page, plan);
+    expect(r.failed).toContain('identity:firstName');
+    expect(r.filled).not.toContain('identity:firstName');
+    expect([...r.filled, ...r.notFound, ...r.failed].sort()).toEqual(plan.entries.map((x) => x.fieldId).sort());
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 60_000);
+
   it('fills every field including comboboxes and the resume', async () => {
     posted.length = 0;
     const page = await open('greenhouse-form.html');
