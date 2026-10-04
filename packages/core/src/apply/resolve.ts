@@ -12,8 +12,10 @@ export function targetFromUrl(url: string): ApplyTarget | null {
   const u = new URL(url);
   const seg = u.pathname.split('/').filter(Boolean);
   let atsJobId: string | undefined;
-  if (hit.ats === 'greenhouse') atsJobId = u.searchParams.get('token') ?? u.searchParams.get('gh_jid') ?? seg[seg.indexOf('jobs') + 1];
-  else atsJobId = seg[1];
+  if (hit.ats === 'greenhouse') {
+    const i = seg.indexOf('jobs');
+    atsJobId = u.searchParams.get('token') ?? u.searchParams.get('gh_jid') ?? (i >= 0 ? seg[i + 1] : undefined);
+  } else atsJobId = seg[1];
   return { kind: hit.ats, url, atsToken: hit.token, ...(atsJobId ? { atsJobId } : {}) };
 }
 

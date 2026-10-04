@@ -22,6 +22,11 @@ describe('targetFromUrl', () => {
     expect(targetFromUrl('https://jobs.ashbyhq.com/vapi/u-1/application')).toMatchObject({ kind: 'ashby', atsToken: 'vapi', atsJobId: 'u-1' });
     expect(targetFromUrl('https://himalayas.app/x')).toBeNull();
   });
+  it('does not invent job ids', () => {
+    expect(targetFromUrl('https://boards.greenhouse.io/gitlab')?.atsJobId).toBeUndefined();
+    expect(targetFromUrl('https://boards.greenhouse.io/embed/job_board?for=acme')?.atsJobId).toBeUndefined();
+    expect(targetFromUrl('https://jobs.lever.co/toptal')?.atsJobId).toBeUndefined();
+  });
 });
 
 describe('resolveApplyTarget', () => {
@@ -59,6 +64,15 @@ describe('extractQuestions', () => {
   it('reads the form for lever/ashby', async () => {
     const qs = await extractQuestions({ kind: 'lever', url: 'https://jobs.lever.co/t/1', atsToken: 't', atsJobId: '1' }, opener({}));
     expect(qs).toEqual([{ id: 'why', label: 'Why us?', type: 'textarea', required: true }]);
+  });
+  it('builds the lever form url from token and id, ignoring query strings', async () => {
+    const seen: string[] = [];
+    const o = opener({}); const rf = o.readForm;
+    o.readForm = async (u) => { seen.push(u); return rf(u); };
+    await extractQuestions({ kind: 'lever', url: 'https://jobs.lever.co/t/1?lever-source=x', atsToken: 't', atsJobId: '1' }, o);
+    expect(seen).toEqual(['https://jobs.lever.co/t/1/apply']);
+    expect(await extractQuestions({ kind: 'ashby', url: 'https://jobs.ashbyhq.com/t', atsToken: 't' }, o)).toEqual(COMMON_QUESTIONS);
+    expect(seen).toHaveLength(1);
   });
   it('falls back to common questions for manual/other or on errors', async () => {
     expect(await extractQuestions({ kind: 'manual', url: 'u' }, null)).toEqual(COMMON_QUESTIONS);

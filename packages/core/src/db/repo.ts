@@ -175,3 +175,10 @@ export function listJobsForDrafting(db: Db, limit: number): JobRow[] {
 export function setResolved(db: Db, jobId: number, url: string, kind: ResolvedKind): void {
   db.update(jobs).set({ resolvedApplyUrl: url, resolvedKind: kind }).where(eq(jobs.id, jobId)).run();
 }
+
+export function resetStaleDrafting(db: Db, olderThan: Date, now = new Date()): number {
+  const stale = db.select({ id: jobs.id }).from(jobs)
+    .where(and(eq(jobs.status, 'drafting'), lt(jobs.updatedAt, olderThan))).all();
+  for (const s of stale) setStatus(db, s.id, 'shortlisted', 'stale drafting reset', {}, now);
+  return stale.length;
+}

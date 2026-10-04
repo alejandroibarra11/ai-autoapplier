@@ -8,7 +8,7 @@ import { parseAnswers } from '../src/answers';
 import { findRoot } from '../src/root';
 import { COMMON_QUESTIONS } from '../src/apply/common';
 import { LLMParseError, type LLMProvider, type StructuredRequest } from '../src/llm/provider';
-import { getJob, insertJobs, latestDraft, listJobsByStatus, recordUsage, setStatus } from '../src/db/repo';
+import { getJob, resetStaleDrafting, insertJobs, latestDraft, listJobsByStatus, recordUsage, setStatus } from '../src/db/repo';
 import { makeJob, testDb } from './helpers';
 
 const root = findRoot();
@@ -113,5 +113,34 @@ describe('runDrafting', () => {
     const p = new Fake([out]);
     await runDrafting(deps(db, p));
     expect(p.calls).toBe(0);
+  });
+
+  it('resets stale drafting jobs and leaves fresh ones', async () => {
+    const { db, jobs } = setup(2);
+    setStatus(db, jobs[0]!.id, 'drafting', null, {}, new Date(now.getTime() - 20 * 60_000));
+    setStatus(db, jobs[1]!.id, 'drafting', null, {}, new Date(now.getTime() - 5 * 60_000));
+    const r = await runDrafting(deps(db, new Fake([out])));
+    expect(r.drafted).toBe(1);
+    expect(getJob(db, jobs[0]!.id)!.status).toBe('draft_ready');
+    expect(getJob(db, jobs[1]!.id)!.status).toBe('drafting');
+    expect(resetStaleDrafting(db, now, now)).toBe(1);
+  });
+
+  it('times out hung steps and carries on', async () => {
+    const { db, jobs } = setup();
+    const never = () => new Promise<never>(() => {});
+    await runDrafting(deps(db, new Fake([out]), { stepTimeoutMs: 20, resolve: never, questions: never, renderPdf: never }));
+    expect(getJob(db, jobs[0]!.id)!.status).toBe('draft_ready');
+    expect(getJob(db, jobs[0]!.id)!.resolvedKind).toBe('manual');
+    expect(latestDraft(db, jobs[0]!.id)!.flags).toContain('CV not generated');
+  });
+
+  it('counts a failed save as an attempt', async () => {
+    const { db, jobs } = setup();
+    const save = () => { throw new Error('disk full'); };
+    await runDrafting(deps(db, new Fake([out]), { save }));
+    expect(getJob(db, jobs[0]!.id)).toMatchObject({ status: 'shortlisted', draftAttempts: 1 });
+    await runDrafting(deps(db, new Fake([out]), { save }));
+    expect(getJob(db, jobs[0]!.id)).toMatchObject({ status: 'draft_failed', draftAttempts: 2 });
   });
 });
