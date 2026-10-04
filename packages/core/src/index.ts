@@ -22,3 +22,5 @@ export * from './http';
 export * from './sources';
 export * from './sources/ats-detect';
 export * from './pipeline/discover';
+export * from './filter/rules';
+export * from './pipeline/filter';
