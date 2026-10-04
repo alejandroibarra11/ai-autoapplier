@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { runDrafting } from '../src/pipeline/draft';
+import { hasDraftWork, runDrafting } from '../src/pipeline/draft';
 import { loadConfig } from '../src/config';
 import { loadProfile } from '../src/profile';
 import { parseAnswers } from '../src/answers';
@@ -142,6 +142,15 @@ describe('runDrafting', () => {
     expect(getJob(db, jobs[0]!.id)!.status).toBe('draft_ready');
     expect(getJob(db, jobs[1]!.id)!.status).toBe('drafting');
     expect(resetStaleDrafting(db, now, now)).toBe(1);
+  });
+
+  it('hasDraftWork sweeps stale drafting jobs before deciding (browser launch gate)', () => {
+    const { db, jobs } = setup(1);
+    setStatus(db, jobs[0]!.id, 'drafting', null, {}, new Date(now.getTime() - 20 * 60_000));
+    expect(hasDraftWork(db, now)).toBe(true);
+    expect(getJob(db, jobs[0]!.id)!.status).toBe('shortlisted');
+    setStatus(db, jobs[0]!.id, 'drafting', null, {}, new Date(now.getTime() - 60_000));
+    expect(hasDraftWork(db, now)).toBe(false);
   });
 
   it('times out hung steps and carries on', async () => {

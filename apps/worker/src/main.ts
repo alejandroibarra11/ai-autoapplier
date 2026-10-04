@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import cron from 'node-cron';
 import { InputFile } from 'grammy';
 import {
-  createProvider, extractQuestions, getJob, latestDraft, listJobsForDrafting, makePageOpener, openBrowser, renderPdf as renderPdfWith,
+  createProvider, extractQuestions, getJob, hasDraftWork, latestDraft, makePageOpener, openBrowser, renderPdf as renderPdfWith,
   resolveApplyTarget, runDrafting, type BrowserSession,
 } from '@autoapplier/core';
 import { createBrowserHolder, createLogThrottle } from './browser-holder';
@@ -55,8 +55,8 @@ const throttleLaunchLog = createLogThrottle(60 * 60_000);
 const failureWatch = createFailureWatch();
 const draftLoop = createDraftLoop({
   run: async () => {
-    // Only launch the browser when there is something to draft.
-    const pending = listJobsForDrafting(app.db, 1).length > 0;
+    // Only launch the browser when there is something to draft (stale `drafting` jobs are swept back first).
+    const pending = hasDraftWork(app.db);
     const session = pending
       ? await holder.get().catch((e) => { throttleLaunchLog(() => console.error('[draft] browser unavailable:', e instanceof Error ? e.message : e)); return null; })
       : null;

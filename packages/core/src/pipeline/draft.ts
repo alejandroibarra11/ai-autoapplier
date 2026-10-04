@@ -29,6 +29,12 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
   return Promise.race([p, t]).finally(() => clearTimeout(timer));
 }
 
+/** Resets stale `drafting` jobs, then reports whether any job is waiting to be drafted. */
+export function hasDraftWork(db: Db, now = new Date()): boolean {
+  resetStaleDrafting(db, new Date(now.getTime() - STALE_DRAFTING_MS), now);
+  return listJobsForDrafting(db, 1).length > 0;
+}
+
 export async function runDrafting(d: DraftStageDeps): Promise<DraftRunResult> {
   const { db, cfg } = d;
   const now = d.now ?? new Date();
