@@ -12,16 +12,20 @@ export interface DraftSender extends MessageSender {
 const LIMIT = 4000;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+function truncate(text: string, max: number): string {
+  const chars = Array.from(text);
+  return chars.length > max ? `${chars.slice(0, max).join('')}…` : text;
+}
+
 export function formatDraftCard(job: JobRow, draft: DraftRow): string {
   const fixed = draft.answers.filter((a) => a.source === 'answers').length;
   const gen = draft.answers.length - fixed;
-  const preview = draft.coverLetter.length > 400 ? `${draft.coverLetter.slice(0, 400)}…` : draft.coverLetter;
   const lines = [
-    `📝 <b>${escapeHtml(job.title)}</b> — ${escapeHtml(job.company)}`,
-    `<i>${escapeHtml(preview)}</i>`,
-    `🧾 ${fixed} fixed · ${gen} generated answers · apply via ${escapeHtml(job.resolvedKind ?? 'manual')}`,
+    `📝 <b>${escapeHtml(truncate(job.title, 200))}</b> — ${escapeHtml(truncate(job.company, 200))}`,
+    `<i>${escapeHtml(truncate(draft.coverLetter, 400))}</i>`,
+    `🧾 ${fixed} fixed · ${gen} generated answers · apply via ${escapeHtml(truncate(job.resolvedKind ?? 'manual', 50))}`,
   ];
-  if (draft.flags.length) lines.push(`⚠️ ${escapeHtml(draft.flags.join('; '))}`);
+  if (draft.flags.length) lines.push(`⚠️ ${escapeHtml(truncate(draft.flags.join('; '), 600))}`);
   lines.push(`✏️ Edit: <code>pnpm web</code> → /jobs/${job.id}`);
   return lines.join('\n');
 }
@@ -32,29 +36,56 @@ export function draftKeyboard(jobId: number, blocked: boolean): InlineKeyboard {
   return kb.text('⏭ Skip', `sd:${jobId}`);
 }
 
-function chunk(blocks: string[]): string[] {
+const ESC_BUDGET = 3500;
+
+/** Split raw text into pieces whose escaped length is <= budget, preferring whitespace boundaries. */
+function splitByEscaped(text: string, budget = ESC_BUDGET): string[] {
+  const chars = Array.from(text);
+  const out: string[] = [];
+  let i = 0;
+  while (i < chars.length) {
+    let len = 0;
+    let j = i;
+    let lastWs = -1;
+    while (j < chars.length) {
+      const w = escapeHtml(chars[j]!).length;
+      if (len + w > budget) break;
+      len += w;
+      if (/\s/.test(chars[j]!)) lastWs = j;
+      j++;
+    }
+    if (j < chars.length && lastWs > i) j = lastWs + 1;
+    out.push(chars.slice(i, j).join(''));
+    i = j;
+  }
+  return out.length ? out : [''];
+}
+
+function pack(blocks: string[]): string[] {
   const out: string[] = [];
   let cur = '';
   for (const b of blocks) {
-    const pieces = b.length > LIMIT ? b.match(new RegExp(`[\\s\\S]{1,${LIMIT - 20}}`, 'g')) ?? [] : [b];
-    for (const p of pieces) {
-      if (cur && cur.length + p.length + 2 > LIMIT) { out.push(cur); cur = ''; }
-      cur = cur ? `${cur}\n\n${p}` : p;
-    }
+    if (cur && cur.length + b.length + 2 > LIMIT) { out.push(cur); cur = ''; }
+    cur = cur ? `${cur}\n\n${b}` : b;
   }
   if (cur) out.push(cur);
   return out;
 }
 
+function pieceBlocks(label: string, text: string, tag: 'pre' | 'code'): string[] {
+  const l = escapeHtml(truncate(label, 200));
+  return splitByEscaped(text).map((p, i) =>
+    `<b>${l}${i > 0 ? ' (cont.)' : ''}</b>\n<${tag}>${escapeHtml(p)}</${tag}>`);
+}
+
 export function formatReadyMessages(job: JobRow, draft: DraftRow): string[] {
   const url = job.resolvedApplyUrl ?? job.applyUrl;
   const blocks = [
-    `🚀 <b>Ready to apply:</b> ${escapeHtml(job.title)} — ${escapeHtml(job.company)}\n${escapeHtml(url)}`,
-    ...draft.answers.map((a) => `<b>${escapeHtml(a.label)}</b>\n<code>${escapeHtml(a.answer)}</code>`),
+    `🚀 <b>Ready to apply:</b> ${escapeHtml(truncate(job.title, 200))} — ${escapeHtml(truncate(job.company, 200))}\n${escapeHtml(truncate(url, 1000))}`,
+    ...draft.answers.flatMap((a) => pieceBlocks(a.label, a.answer, 'code')),
+    ...pieceBlocks('Cover letter', draft.coverLetter, 'pre'),
   ];
-  const cover = escapeHtml(draft.coverLetter);
-  const coverParts = cover.length > LIMIT - 40 ? cover.match(new RegExp(`[\\s\\S]{1,${LIMIT - 40}}`, 'g')) ?? [] : [cover];
-  return chunk([...blocks, ...coverParts.map((p, i) => `${i === 0 ? '<b>Cover letter</b>\n' : ''}<pre>${p}</pre>`)]);
+  return pack(blocks);
 }
 
 export function parseDraftCallback(data: string): { action: 'approve' | 'skip' | 'applied'; jobId: number } | null {
@@ -113,12 +144,21 @@ export async function notifyDrafts(sender: DraftSender, chatId: string, db: Db, 
 
 export async function sendReady(sender: DraftSender, chatId: string, job: JobRow, draft: DraftRow): Promise<void> {
   const msgs = formatReadyMessages(job, draft);
+  const button = () => ({ parse_mode: 'HTML' as const, link_preview_options: { is_disabled: true }, reply_markup: new InlineKeyboard().text('📨 Mark applied', `ma:${job.id}`) });
+  const plain = { parse_mode: 'HTML' as const, link_preview_options: { is_disabled: true } };
+  let lastDelivered = -1;
   for (const [i, m] of msgs.entries()) {
     const last = i === msgs.length - 1;
-    await sender.sendMessage(chatId, m, {
-      parse_mode: 'HTML', link_preview_options: { is_disabled: true },
-      ...(last ? { reply_markup: new InlineKeyboard().text('📨 Mark applied', `ma:${job.id}`) } : {}),
-    });
+    try {
+      await sender.sendMessage(chatId, m, last ? button() : plain);
+      lastDelivered = i;
+    } catch (e) {
+      console.error(`[telegram] ready message ${i + 1}/${msgs.length} failed for job #${job.id}:`, e instanceof Error ? e.message : e);
+    }
+  }
+  if (lastDelivered !== msgs.length - 1) {
+    await sender.sendMessage(chatId, '📨 Mark applied when done', button()).catch((e) =>
+      console.error(`[telegram] mark-applied prompt failed for job #${job.id}:`, e instanceof Error ? e.message : e));
   }
   if (draft.cvPdfPath) await sender.sendDocument(chatId, draft.cvPdfPath, `CV — ${job.company}`).catch(() => {});
 }

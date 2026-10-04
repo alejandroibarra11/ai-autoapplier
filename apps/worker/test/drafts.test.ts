@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, insertJobs, listJobsByStatus, setStatus, insertDraft, getJob, latestDraft, type DraftInput } from '@autoapplier/core';
-import { formatDraftCard, formatReadyMessages, handleDraftAction, notifyDrafts, parseDraftCallback } from '../src/drafts';
+import { formatDraftCard, formatReadyMessages, handleDraftAction, notifyDrafts, parseDraftCallback, sendReady } from '../src/drafts';
 
 function setup(flags: string[] = [], coverLetter = 'I build <LLM> tools & agents.') {
   const db = openDb(':memory:');
@@ -101,5 +101,84 @@ describe('notifyDrafts', () => {
     const sender = { sendMessage: async () => {}, sendDocument: async () => { throw new Error('file missing'); } };
     expect(await notifyDrafts(sender, '42', db, { delay: async () => {} })).toBe(1);
     expect(await notifyDrafts(sender, '42', db, { delay: async () => {} })).toBe(0);
+  });
+});
+
+describe('safe chunking', () => {
+  const count = (s: string, re: RegExp) => (s.match(re) ?? []).length;
+  it('never cuts escaped entities or unbalances <pre>', () => {
+    const { db, id } = setup([], '& < > '.repeat(2000));
+    const msgs = formatReadyMessages(getJob(db, id)!, latestDraft(db, id)!);
+    expect(msgs.length).toBeGreaterThan(1);
+    for (const m of msgs) {
+      expect(m.length).toBeLessThanOrEqual(4000);
+      expect(count(m, /<pre>/g)).toBe(count(m, /<\/pre>/g));
+      const text = m.replace(/<\/?(?:b|code|pre)>/g, '');
+      expect(text).toMatch(/^(?:[^&]|&(?:amp|lt|gt|quot);)*$/);
+    }
+  });
+  it('splits one huge answer across balanced <code> blocks', () => {
+    const s = setup();
+    const long = 'a & b '.repeat(1000);
+    insertDraft(s.db, {
+      jobId: s.id, model: 'm', coverLetter: 'c', cvPdfPath: null, flags: [], questions: [], cvSelection: { skillsOrder: [], bulletIds: [] },
+      answers: [{ questionId: 'x', label: 'Long?', answer: long, source: 'generated' }],
+    });
+    const msgs = formatReadyMessages(getJob(s.db, s.id)!, latestDraft(s.db, s.id)!);
+    expect(msgs.length).toBeGreaterThan(1);
+    expect(msgs.join('\n')).toContain('Long? (cont.)');
+    for (const m of msgs) {
+      expect(m.length).toBeLessThanOrEqual(4000);
+      expect(count(m, /<code>/g)).toBe(count(m, /<\/code>/g));
+      expect(m.replace(/<\/?(?:b|code|pre)>/g, '')).toMatch(/^(?:[^&]|&(?:amp|lt|gt|quot);)*$/);
+    }
+  });
+});
+
+describe('sendReady resilience', () => {
+  it('continues after a failed message and attaches exactly one ma: button', async () => {
+    const { db, id } = setup([], 'word '.repeat(1500));
+    const sent: { text: string; markup: unknown }[] = [];
+    let n = 0;
+    const sender = {
+      sendMessage: async (_c: string, text: string, o?: { reply_markup?: unknown }) => {
+        if (++n === 2) throw new Error('boom');
+        sent.push({ text, markup: o?.reply_markup });
+      },
+      sendDocument: async () => {},
+    };
+    const total = formatReadyMessages(getJob(db, id)!, latestDraft(db, id)!).length;
+    expect(total).toBeGreaterThan(2);
+    await sendReady(sender, '42', getJob(db, id)!, latestDraft(db, id)!);
+    expect(sent.length).toBe(total - 1);
+    expect(sent.filter((s) => s.markup).length).toBe(1);
+    expect(sent[sent.length - 1]!.markup).toBeTruthy();
+  });
+  it('sends a trailing button message if the last send fails', async () => {
+    const { db, id } = setup();
+    const total = formatReadyMessages(getJob(db, id)!, latestDraft(db, id)!).length;
+    const sent: { text: string; markup: unknown }[] = [];
+    let n = 0;
+    const sender = {
+      sendMessage: async (_c: string, text: string, o?: { reply_markup?: unknown }) => {
+        if (++n === total) throw new Error('boom');
+        sent.push({ text, markup: o?.reply_markup });
+      },
+      sendDocument: async () => {},
+    };
+    await sendReady(sender, '42', getJob(db, id)!, latestDraft(db, id)!);
+    expect(sent.filter((s) => s.markup).length).toBe(1);
+    expect(sent[sent.length - 1]!.text).toContain('Mark applied');
+  });
+});
+
+describe('card bounds', () => {
+  it('caps flags and total length', () => {
+    const flags = Array.from({ length: 30 }, (_, i) => `CV note ${i} ${'x'.repeat(200)}`);
+    const { db, id } = setup(flags, '😀'.repeat(500));
+    const card = formatDraftCard(getJob(db, id)!, latestDraft(db, id)!);
+    expect(card.length).toBeLessThanOrEqual(4000);
+    expect(card).toContain('…');
+    expect(card).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
   });
 });
