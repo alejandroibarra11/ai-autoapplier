@@ -19,7 +19,7 @@ export const TECH_TERMS: string[] = [
   // cloud / devops
   'AWS', 'GCP', 'Azure', 'Google Cloud', 'Cloudflare', 'Vercel', 'Netlify', 'Heroku', 'DigitalOcean', 'EC2', 'S3',
   'Kubernetes', 'Docker', 'Terraform', 'Ansible', 'Pulumi', 'Helm', 'Jenkins', 'GitHub Actions', 'GitLab CI', 'CircleCI', 'ArgoCD',
-  'Prometheus', 'Grafana', 'Datadog', 'Sentry', 'New Relic', 'OpenTelemetry', 'Nginx', 'Linux', 'Istio', 
+  'Prometheus', 'Grafana', 'Datadog', 'Sentry', 'New Relic', 'OpenTelemetry', 'Nginx', 'Linux', 'Istio',
   // AI / ML
   'TensorFlow', 'PyTorch', 'Keras', 'scikit-learn', 'JAX', 'Hugging Face', 'Transformers', 'LangChain', 'LangGraph', 'LlamaIndex',
   'OpenAI', 'Anthropic', 'Claude', 'GPT-4', 'ChatGPT', 'Gemini', 'Llama', 'Mistral', 'Cohere', 'Ollama', 'vLLM', 'CrewAI', 'AutoGen',
@@ -32,3 +32,9 @@ export const TECH_TERMS: string[] = [
   'Git', 'GitHub', 'GitLab', 'Jira', 'Stripe', 'Auth0', 'Okta', 'Salesforce', 'HubSpot', 'Zapier', 'n8n', 'Shopify',
   'Jest', 'Vitest', 'Pytest', 'Cypress', 'Playwright', 'Selenium', 'Puppeteer', 'Figma', 'Postman', 'Swagger',
 ];
+
+/** Terms that are also ordinary words or abbreviations; the backstop scan matches these case-sensitively. */
+export const CASE_SENSITIVE_TERMS = new Set<string>([
+  'Go', 'ML', 'Rust', 'Java', 'Git', 'Spark', 'Ruby', 'Dart', 'Lua', 'Zig', 'Perl', 'REST', 'SIP', 'RAG', 'Sass', 'Vite',
+  'Helm', 'Jest', 'Astro', 'Sentry', 'Claude', 'Transformers', 'Gemini', 'Llama', 'Mistral', 'Vault', 'Gin', 'Express',
+]);

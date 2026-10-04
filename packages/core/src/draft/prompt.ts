@@ -25,11 +25,10 @@ RULES
 - claimedSkills: every technology, tool or skill you mention in coverLetter or answers.`;
 }
 
-const strip = (s: string, tag: string) => s.replace(new RegExp(`</${tag}>`, 'gi'), '');
+const clean = (s: string) => s.replace(/<\/(posting|form_questions)>/gi, '');
 
 export function buildDraftUser(jobContext: string, toGenerate: FormQuestion[], fixed: DraftAnswer[]): string {
-  const fq = (s: string) => strip(s, 'form_questions');
-  const qs = toGenerate.map((q) => `- ${q.id}: ${fq(q.label)}${q.required ? ' (required)' : ''}${q.options ? ` OPTIONS: ${q.options.map(fq).join(' | ')}` : ''}`).join('\n');
-  const fx = fixed.map((a) => `- ${a.label}: ${a.answer}`).join('\n');
-  return `<posting>\n${strip(jobContext, 'posting')}\n</posting>\n\nQUESTIONS TO ANSWER\n<form_questions>\n${qs || '(none)'}\n</form_questions>\n\nALREADY ANSWERED (context only, do not repeat)\n${fx || '(none)'}`;
+  const qs = toGenerate.map((q) => `- ${clean(q.id)}: ${clean(q.label)}${q.required ? ' (required)' : ''}${q.options ? ` OPTIONS: ${q.options.map(clean).join(' | ')}` : ''}`).join('\n');
+  const fx = fixed.map((a) => `- ${clean(a.label)}: ${clean(a.answer)}`).join('\n');
+  return `<posting>\n${clean(jobContext)}\n</posting>\n\n<form_questions>\nQUESTIONS TO ANSWER\n${qs || '(none)'}\n\nALREADY ANSWERED (context only, do not repeat)\n${fx || '(none)'}\n</form_questions>`;
 }

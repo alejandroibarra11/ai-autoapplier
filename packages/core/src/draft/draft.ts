@@ -7,7 +7,7 @@ import type { CvSelection, DraftAnswer, FormQuestion } from '../apply/types';
 import { LLMParseError, type LLMProvider, type LLMUsage } from '../llm/provider';
 import { jobContextText } from '../score/prompt';
 import { DraftLLMSchema, type DraftLLMOutput } from './schema';
-import { TECH_TERMS } from './tech-terms';
+import { TECH_TERMS, CASE_SENSITIVE_TERMS } from './tech-terms';
 import { buildDraftSystem, buildDraftUser } from './prompt';
 
 export const MAX_COVER_WORDS = 260;
@@ -105,9 +105,9 @@ export async function draftJob(ctx: DraftContext): Promise<DraftResult> {
     flags.push(`unverified claim: ${t}`);
   };
   out.claimedSkills.forEach(checkClaim);
-  // Case-sensitive so common words ("go", "ml") in ordinary prose do not trip the scan.
+  // Ambiguous terms (CASE_SENSITIVE_TERMS) match case-sensitively so ordinary words ("rust belt") do not trip the scan.
   const prose = [out.coverLetter, ...generated.map((g) => g.answer)].join('\n');
-  for (const term of TECH_TERMS) if (termRegex(term, '').test(prose)) checkClaim(term);
+  for (const term of TECH_TERMS) if (termRegex(term, CASE_SENSITIVE_TERMS.has(term) ? '' : 'i').test(prose)) checkClaim(term);
 
   const bullets = profileBullets(ctx.profile);
   const known = new Set(bullets.map((b) => b.id));
