@@ -15,6 +15,20 @@
       "when": 1791074630149,
       "tag": "0001_dizzy_namor",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791093299559,
+      "tag": "0002_plain_maggott",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791096755288,
+      "tag": "0003_fearless_vanisher",
+      "breakpoints": true
     }
   ]
 }

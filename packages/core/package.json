@@ -8,6 +8,7 @@
   "scripts": {
     "test": "vitest run",
     "smoke": "tsx scripts/smoke-sources.ts",
+    "probe": "tsx scripts/probe-companies.ts",
     "typecheck": "tsc -p tsconfig.json",
     "db:generate": "drizzle-kit generate"
   },
@@ -18,6 +19,7 @@
     "fast-xml-parser": "^5.11.2",
     "html-to-text": "^10.0.1",
     "openai": "^7.27.0",
+    "playwright": "^1.63.0",
     "yaml": "^2.9.1",
     "zod": "^4.6.5"
   },

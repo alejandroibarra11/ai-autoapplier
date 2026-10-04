@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
-import { formatComp, getJob, latestScore, listEvents } from '@autoapplier/core';
+import { formatComp, getJob, latestDraft, latestScore, listEvents } from '@autoapplier/core';
 import { getDb } from '../../../lib/db';
+import { DraftPanel } from './draft-panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +11,7 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
   const job = db ? getJob(db, Number(id)) : undefined;
   if (!db || !job) notFound();
   const score = latestScore(db, job.id);
+  const draft = latestDraft(db, job.id);
   const events = listEvents(db, job.id);
   return (
     <>
@@ -18,6 +20,7 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
         <p className="muted">{job.company} · {job.locationText || '—'} · {formatComp(job) ?? 'pay not listed'} · {job.source} · status <b>{job.status}</b></p>
         <a href={job.applyUrl} target="_blank" rel="noreferrer">Open posting ↗</a>
       </div>
+      <DraftPanel job={job} draft={draft} />
       {score && (
         <div className="card">
           <p><b>Fit {score.fitScore}</b> · {score.roleCategory} · eligibility <b>{score.eligibility}</b></p>

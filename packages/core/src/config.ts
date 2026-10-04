@@ -40,6 +40,15 @@ export const ConfigSchema = z.object({
     wwr: z.object({ enabled: z.boolean(), feeds: z.array(z.string()) }),
   }),
   seedCompanies: z.array(SeedCompany),
+  drafting: z.object({
+    provider: z.enum(['anthropic', 'openai']),
+    model: z.string().min(1),
+    effort: z.enum(['low', 'medium', 'high']),
+    dailySpendCapUsd: z.number().positive(),
+    maxAttempts: z.number().int().positive(),
+    pollSeconds: z.number().int().min(10),
+  }),
+  browser: z.object({ headless: z.boolean(), timeoutMs: z.number().int().positive() }),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 

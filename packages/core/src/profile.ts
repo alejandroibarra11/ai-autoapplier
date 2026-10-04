@@ -51,3 +51,12 @@ export function renderProfileForPrompt(p: Profile): string {
   }
   return lines.join('\n');
 }
+
+export function profileBullets(p: Profile): { id: string; role: string; company: string; text: string }[] {
+  return p.experience.flatMap((e, ei) => e.highlights.map((text, bi) => ({ id: `e${ei}-b${bi}`, role: e.role, company: e.company, text })));
+}
+
+export function profileVocabulary(p: Profile): string[] {
+  const terms = [...Object.values(p.skills).flat(), ...p.projects.flatMap((pr) => pr.stack)];
+  return [...new Set(terms.map((t) => t.trim().toLowerCase()).filter(Boolean))];
+}

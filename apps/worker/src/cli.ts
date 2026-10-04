@@ -65,7 +65,36 @@ if (cmd === 'once') {
     console.log(`false positives (would waste an application): ${m.falsePositives.join(', ') || 'none'}`);
     console.log(`false negatives (missed eligible jobs): ${m.falseNegatives.join(', ') || 'none'}`);
   }
+} else if (cmd === 'draft') {
+  const id = Number(process.argv[3]);
+  const { getJob, setStatus, runDrafting, resolveApplyTarget, extractQuestions, openBrowser, makePageOpener, renderPdf, latestDraft } = await import('@autoapplier/core');
+  const { join } = await import('node:path');
+  const { cliDraftRefusal } = await import('./drafts');
+  const job = Number.isInteger(id) ? getJob(app.db, id) : null;
+  if (!job) { console.log(`job ${process.argv[3]} not found`); process.exitCode = 1; }
+  else {
+    const refusal = cliDraftRefusal(job.status);
+    if (refusal) { console.error(`job ${id} ${refusal}`); process.exitCode = 1; }
+    else {
+      if (job.status !== 'shortlisted') setStatus(app.db, id, 'shortlisted', 'cli draft');
+      let session: Awaited<ReturnType<typeof openBrowser>> | null = null;
+      try { session = await openBrowser({ headless: app.cfg.browser.headless, userDataDir: join(app.root, 'data/browser-cli') }); }
+      catch (e) { console.warn('browser unavailable, continuing without it:', e instanceof Error ? e.message : e); }
+      const opener = session ? makePageOpener(session, app.cfg.browser.timeoutMs) : null;
+      try {
+        const r = await runDrafting({
+          db: app.db, cfg: app.cfg, provider: createProvider(app.cfg.drafting.provider), profile: app.profile, answers: app.answers,
+          cvDir: join(app.root, 'data/cv'), onlyJobId: id,
+          resolve: (j) => resolveApplyTarget(j, opener), questions: (t) => extractQuestions(t, opener),
+          renderPdf: async (html, out) => { if (!session) throw new Error('no browser'); await renderPdf(session, html, out); },
+        });
+        console.log(r);
+        const d = latestDraft(app.db, id);
+        if (d) console.log(JSON.stringify({ kind: getJob(app.db, id)?.resolvedKind, flags: d.flags, cv: d.cvPdfPath, coverLetter: d.coverLetter, answers: d.answers }, null, 2));
+      } finally { await session?.close().catch(() => {}); }
+    }
+  }
 } else {
-  console.log('usage: pnpm --filter @autoapplier/worker cli <once|export-eval [n]|eval [model]>');
+  console.log('usage: pnpm --filter @autoapplier/worker cli <once|export-eval [n]|eval [model]|draft <jobId>>');
   process.exitCode = 1;
 }

@@ -12,7 +12,7 @@ export class AnthropicProvider implements LLMProvider {
       max_tokens: req.maxTokens,
       system: req.system,
       messages: [{ role: 'user', content: req.user }],
-      output_config: { format: zodOutputFormat(req.schema) },
+      output_config: { format: zodOutputFormat(req.schema), ...(req.effort ? { effort: req.effort } : {}) },
     });
     const usage: LLMUsage = { provider: 'anthropic', model, inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens };
     if (!res.parsed_output) throw new LLMParseError(`anthropic: no parsed output (stop_reason=${res.stop_reason})`, usage);

@@ -1,0 +1,1 @@
+ALTER TABLE `jobs` ADD `draft_failure_notified_at` integer;

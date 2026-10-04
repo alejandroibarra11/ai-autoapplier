@@ -1,0 +1,16 @@
+fullName: Jane Doe
+email: jane@example.com
+phone: "+52 000 000 0000"
+country: Mexico
+location: Somewhere, Mexico
+timezone: GMT-7 (Mountain Time)
+workAuthorizationUS: "No"
+sponsorship: "No — I'm based in Mexico and work as an independent contractor; no visa sponsorship needed."
+salaryExpectation: "USD 50–60/hour as a contractor (negotiable for the right role)"
+noticePeriod: "2 weeks"
+englishLevel: "C1 — professional working proficiency"
+linkedin: https://www.linkedin.com/in/example
+github: https://github.com/example
+# portfolio: https://example.dev
+# extraMatchers:            # optional: more label regex → key mappings
+#   - { pattern: "hourly rate", key: salaryExpectation }

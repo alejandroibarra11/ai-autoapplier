@@ -12,7 +12,12 @@ export { detectAts, findAtsInHtml } from './sources/ats-detect';
 // Config, profile, scoring, database
 export * from './config';
 export * from './profile';
+export * from './answers';
 export * from './score/schema';
+export * from './apply/types';
+export * from './apply/common';
+export * from './apply/greenhouse-questions';
+export * from './apply/form-fields';
 export * from './db/schema';
 export * from './db/client';
 export * from './db/repo';
@@ -35,4 +40,16 @@ export * from './score/prompt';
 export * from './score/score';
 export * from './pipeline/score';
 
+export * from './draft/schema';
+export * from './draft/prompt';
+export * from './draft/draft';
+export * from './draft/edits';
+
 export * from './eval/metrics';
+
+export * from './cv/render';
+export * from './browser';
+
+export * from './apply/resolve';
+export * from './apply/questions';
+export * from './pipeline/draft';

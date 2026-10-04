@@ -78,3 +78,61 @@ seedCompanies:
   - { ats: ashby, token: elevenlabs, name: ElevenLabs }
   - { ats: ashby, token: livekit, name: LiveKit }
   - { ats: lever, token: toptal, name: Toptal }
+  # added 2026-10-04 by probe-companies
+  - { ats: ashby, token: oyster, name: Oyster }
+  - { ats: ashby, token: buffer, name: Buffer }
+  - { ats: greenhouse, token: wikimedia, name: Wikimedia }
+  - { ats: greenhouse, token: mozilla, name: Mozilla }
+  - { ats: ashby, token: airbyte, name: Airbyte }
+  - { ats: greenhouse, token: grafanalabs, name: Grafana Labs }
+  - { ats: greenhouse, token: netlify, name: Netlify }
+  - { ats: ashby, token: n8n, name: n8n }
+  - { ats: ashby, token: plane, name: Plane }
+  - { ats: greenhouse, token: twilio, name: Twilio }
+  - { ats: greenhouse, token: vercel, name: Vercel }
+  - { ats: ashby, token: clerk, name: Clerk }
+  - { ats: ashby, token: resend, name: Resend }
+  - { ats: ashby, token: linear, name: Linear }
+  - { ats: ashby, token: replit, name: Replit }
+  - { ats: ashby, token: modal, name: Modal }
+  - { ats: ashby, token: baseten, name: Baseten }
+  - { ats: greenhouse, token: togetherai, name: Together AI }
+  - { ats: ashby, token: fireworks, name: Fireworks AI }
+  - { ats: ashby, token: cohere, name: Cohere }
+  - { ats: ashby, token: retell-ai, name: Retell AI }
+  - { ats: ashby, token: bland, name: Bland AI }
+  - { ats: ashby, token: deepgram, name: Deepgram }
+  - { ats: greenhouse, token: assemblyai, name: AssemblyAI }
+  - { ats: ashby, token: cartesia, name: Cartesia }
+  - { ats: greenhouse, token: polyai, name: PolyAI }
+  - { ats: greenhouse, token: humeai, name: Hume AI }
+  - { ats: ashby, token: sierra, name: Sierra }
+  - { ats: ashby, token: decagon, name: Decagon }
+  - { ats: greenhouse, token: cresta, name: Cresta }
+  - { ats: greenhouse, token: observeai, name: Observe.AI }
+  - { ats: lever, token: kavak, name: Kavak }
+  - { ats: greenhouse, token: clara, name: Clara }
+  - { ats: ashby, token: nubank, name: Nubank }
+  - { ats: greenhouse, token: wizeline, name: Wizeline }
+  - { ats: ashby, token: truelogic, name: Truelogic }
+  - { ats: ashby, token: andela, name: Andela }
+  - { ats: greenhouse, token: turing, name: Turing }
+  - { ats: ashby, token: terminal, name: Terminal }
+  - { ats: lever, token: oowlish, name: Oowlish }
+  - { ats: greenhouse, token: consensys, name: Consensys }
+  - { ats: ashby, token: alchemy, name: Alchemy }
+  - { ats: ashby, token: helius, name: Helius }
+  - { ats: greenhouse, token: fleetio, name: Fleetio }
+  - { ats: greenhouse, token: dremio, name: Dremio }
+
+drafting:
+  provider: anthropic
+  model: claude-opus-5-5
+  effort: medium
+  dailySpendCapUsd: 3
+  maxAttempts: 2
+  pollSeconds: 60
+
+browser:
+  headless: true
+  timeoutMs: 20000

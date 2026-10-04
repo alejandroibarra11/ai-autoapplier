@@ -21,6 +21,17 @@ describe('AnthropicProvider', () => {
     expect(sent.output_config.format).toBeDefined();
   });
 
+  it('passes effort only when given', async () => {
+    const sents: any[] = [];
+    const fake = { messages: { parse: async (p: unknown) => { sents.push(p); return {
+      parsed_output: { ok: true }, stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }; } } };
+    const p = new AnthropicProvider(fake as unknown as Anthropic);
+    await p.generateStructured('m', { ...req, effort: 'medium' });
+    await p.generateStructured('m', req);
+    expect(sents[0].output_config.effort).toBe('medium');
+    expect('effort' in sents[1].output_config).toBe(false);
+  });
+
   it('throws LLMParseError with usage when nothing parsed', async () => {
     const fake = { messages: { parse: async () => ({ parsed_output: null, stop_reason: 'max_tokens', usage: { input_tokens: 1, output_tokens: 2 } }) } };
     const p = new AnthropicProvider(fake as unknown as Anthropic);
