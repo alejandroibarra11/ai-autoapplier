@@ -117,7 +117,7 @@ export async function draftJob(ctx: DraftContext): Promise<DraftResult> {
   if (bulletIds.length === 0) bulletIds = bullets.map((b) => b.id);
 
   const groups = Object.keys(ctx.profile.skills);
-  const skillsOrder = [...out.skillsOrder.filter((k) => groups.includes(k)), ...groups.filter((k) => !out.skillsOrder.includes(k))];
+  const skillsOrder = [...new Set([...out.skillsOrder.filter((k) => groups.includes(k)), ...groups])];
 
   const words = out.coverLetter.trim().split(/\s+/).filter(Boolean).length;
   if (words > MAX_COVER_WORDS) flags.push(`cover letter too long: ${words} words`);

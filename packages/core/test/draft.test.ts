@@ -85,6 +85,10 @@ describe('draftJob', () => {
     expect(r.flags).toContain('unknown CV bullet ids: e9-b9');
   });
 
+  it('dedupes repeated skill groups from the model', async () => {
+    const r = await draftJob(ctx(new Fake([{ ...good, skillsOrder: ['ai', 'ai', 'backend', 'ai'] }])));
+    expect(r.cvSelection.skillsOrder).toEqual(['ai', 'backend', 'frontend']);
+  });
   it('keeps every profile skill group, model order first', async () => {
     const r = await draftJob(ctx(new Fake([{ ...good, skillsOrder: ['backend', 'nonsense'] }])));
     expect(r.cvSelection.skillsOrder).toEqual(['backend', 'ai', 'frontend']);

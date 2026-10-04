@@ -9,7 +9,7 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 export function renderCvHtml(profile: Profile, answers: Answers, sel: CvSelection): string {
   const bullets = profileBullets(profile);
   const chosen = [...new Set(sel.bulletIds)].map((id) => bullets.find((b) => b.id === id)).filter((b): b is NonNullable<typeof b> => !!b);
-  const groups = [...sel.skillsOrder.filter((k) => profile.skills[k]), ...Object.keys(profile.skills).filter((k) => !sel.skillsOrder.includes(k))];
+  const groups = [...new Set([...sel.skillsOrder.filter((k) => profile.skills[k]), ...Object.keys(profile.skills)])];
   const contact = [answers.email, answers.phone, profile.location, answers.linkedin, answers.github, answers.portfolio]
     .filter((x): x is string => !!x).map(esc).join(' · ');
 

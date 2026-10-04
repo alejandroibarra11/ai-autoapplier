@@ -32,6 +32,10 @@ describe('renderCvHtml', () => {
     const html = renderCvHtml(p, answers, { skillsOrder: [], bulletIds: ids });
     expect((html.match(/<li>/g) ?? []).length).toBe(6);
   });
+  it('renders a repeated skill group only once', () => {
+    const html = renderCvHtml(profile, answers, { skillsOrder: ['ai', 'ai', 'backend'], bulletIds: ['e0-b0'] });
+    expect(html.split('OpenAI API').length - 1).toBe(1);
+  });
   it('renders a repeated bullet id only once', () => {
     const html = renderCvHtml(profile, answers, { skillsOrder: [], bulletIds: ['e0-b0', 'e0-b0', 'e0-b0'] });
     expect((html.match(/<li>/g) ?? []).length).toBe(1);
