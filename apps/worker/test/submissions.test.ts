@@ -7,6 +7,7 @@ import {
   STALE_SUBMIT_NOTE, type FillEntry, type FillPlan, type ResolvedKind,
 } from '@autoapplier/core';
 import { handleDraftAction } from '../src/drafts';
+import { escapeHtml } from '../src/telegram';
 import {
   createSubmitTaps, formatFillCard, handleCancel, notifySubmissions, parseSubmitCallback, photoFits, reportSubmitResult,
   sendReadyUnlessAutoFill, submitAndReport, type SubmissionSender,
@@ -93,6 +94,13 @@ describe('formatFillCard', () => {
     expect(card).toContain('✍️ 2 filled · 3 not on form · CV attached');
     expect(card).toContain('Not on this form: Email, LinkedIn, GitHub &lt;x&gt;');
     expect(card).not.toContain('Portfolio');
+  });
+  it('Ashby cards disclose that the employer already saved the values; other kinds do not', () => {
+    const line = "ℹ️ Ashby saves these values on the employer's side while filling — Cancel doesn't remove them.";
+    const a = setup({ kind: 'ashby' });
+    expect(formatFillCard(getJob(a.db, a.id)!, latestSubmission(a.db, a.id)!, false)).toContain(escapeHtml(line));
+    const g = setup({ kind: 'greenhouse' });
+    expect(formatFillCard(getJob(g.db, g.id)!, latestSubmission(g.db, g.id)!, false)).not.toContain('Ashby saves');
   });
   it('caps the fill-time answers it lists', () => {
     const many = { ...PLAN, entries: Array.from({ length: 12 }, (_, i) => entry(`q${i}`, `Question ${i}`, 'x'.repeat(500), 'fill_time')) };

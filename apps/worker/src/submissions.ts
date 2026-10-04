@@ -16,6 +16,8 @@ export const AUTO_FILL_KINDS: readonly string[] = ['greenhouse', 'lever', 'ashby
 type SubmitCfg = { submit: Pick<Config['submit'], 'dryRun'> };
 const CAPTION_LIMIT = 1024;
 const MAX_FILL_TIME_LISTED = 5;
+/** Ashby autosaves form values to the employer while filling (see README). */
+export const ASHBY_AUTOSAVE_NOTE = "ℹ️ Ashby saves these values on the employer's side while filling — Cancel doesn't remove them.";
 const DRY_RUN_BANNER = '🧪 Dry run is ON — Submit will not send anything';
 const DRY_RUN_RESULT = '🧪 Dry run — nothing was sent. Turn off submit.dryRun in config.yaml to submit for real.';
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -53,6 +55,7 @@ function fillCardParts(job: JobRow, sub: SubmissionRow, dryRun: boolean): { head
   const counts = [`${sum.filled} filled`, ...(sub.report ? [`${sum.notOnForm.length} not on form`] : []), sum.cvAttached ? 'CV attached' : 'no CV'];
   const head = [`🧾 <b>${jobName(job)}</b>`, `✍️ ${counts.join(' · ')}`];
   if (sum.notOnForm.length) head.push(`Not on this form: ${esc(sum.notOnForm.join(', '), 300)}`);
+  if (job.resolvedKind === 'ashby') head.push(escapeHtml(ASHBY_AUTOSAVE_NOTE));
   if (dryRun) head.push(DRY_RUN_BANNER);
   const fillTime = entries.filter((e) => e.source === 'fill_time');
   const details = fillTime.slice(0, MAX_FILL_TIME_LISTED)

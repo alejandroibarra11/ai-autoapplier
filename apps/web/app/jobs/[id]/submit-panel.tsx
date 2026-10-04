@@ -17,6 +17,7 @@ export function SubmitPanel({ job, sub, dryRun }: { job: JobRow; sub: Submission
       {awaiting && (dryRun
         ? <p>🧪 <b>Dry run is ON</b> — Submit will not send anything.</p>
         : <p>🔴 <b>Dry run is OFF</b> — Submit will send the application for real.</p>)}
+      {job.resolvedKind === 'ashby' && <p>ℹ️ Ashby saves these values on the employer&apos;s side while filling — Cancel doesn&apos;t remove them.</p>}
       <p>Result: <b>{RESULT_TEXT[sub.result] ?? sub.result}</b>{sub.evidence ? <span className="muted"> — {sub.evidence}</span> : null}</p>
       {(() => {
         const sum = fillSummary(sub.plan, sub.report);
