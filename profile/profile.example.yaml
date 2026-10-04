@@ -1,0 +1,26 @@
+name: Jane Doe
+headline: AI Engineer · Senior Full Stack Developer
+location: Somewhere, Mexico
+timezone: GMT-7
+workAuthorization: >-
+  Based in Mexico. Not authorized to work in the US. Available as an independent contractor
+  (own entity or EOR such as Deel); no visa sponsorship needed for contractor roles.
+englishLevel: C1 (professional working proficiency)
+yearsExperience: 5
+summary: >-
+  Full stack engineer focused on LLM applications and voice agents.
+skills:
+  ai: [OpenAI API, RAG, Prompt engineering]
+  frontend: [React, TypeScript]
+  backend: [Node.js, NestJS]
+experience:
+  - company: Example Co
+    role: Senior Full Stack Developer
+    start: 2022-08
+    end: present
+    highlights:
+      - Built X that did Y for Z users.
+projects:
+  - name: Example voice agent
+    summary: Voice agent that handles reservations.
+    stack: [Python, OpenAI]

@@ -14,7 +14,7 @@
 
 - Node 22 via `mise.toml` (`node = "22"`); pnpm workspace; every package `"type": "module"`; TS `moduleResolution: "Bundler"`, extensionless relative imports.
 - **No personal data or secrets committed.** `profile/*` (except `*.example.*` and `README.md`), `.env`, `data/`, `*.db` are git-ignored (already in `.gitignore`). The repo is public.
-- `~/dev/contler` and `~/Downloads` are **read-only** sources of context. Never write there.
+- The user's work repositories and CV PDF are **read-only** sources of context. Never write there.
 - No LinkedIn scraping. Only the public endpoints listed in this plan.
 - HTTP requests send `user-agent: ai-autoapplier/0.1 (personal job search)` and a 30 s timeout. Sources are fetched sequentially.
 - Job statuses (exact strings): `discovered`, `filtered_out`, `passed_rules`, `score_failed`, `ineligible`, `low_score`, `awaiting_review`, `shortlisted`, `skipped`.
@@ -2966,11 +2966,11 @@ export function createBot(token: string, chatId: string, db: Db): Bot {
 - Create: `profile/profile.yaml` (git-ignored — never committed)
 
 **Interfaces:**
-- Consumes: `ProfileSchema` (Task 3). Read-only sources: the most recent CV PDF in `~/Downloads` (extract with `pdftotext -layout`), and READMEs/code in `~/dev/contler/{voice-agent,rag-admin,sync-assistant-rag-cron,eleven-tools,contler-ai,ctr-backend-api}`.
+- Consumes: `ProfileSchema` (Task 3). Read-only sources: the user's CV PDF (extract with `pdftotext -layout`), and READMEs/code in the user's work repositories (read-only).
 
 - [ ] **Step 1: Draft `profile/profile.yaml`** following `profile/profile.example.yaml`. Rules:
-  - Every highlight must be backed by the CV or by code/README evidence in `~/dev/contler`. No invented metrics; keep the CV's metrics as stated.
-  - Include the AI evidence the CV under-sells (verify each in the repo before writing): Python voice agent (`voice-agent/bot.py`, gRPC `chat_pb2*`, Langfuse eval results), RAG admin (React 19 + Firebase) and RAG sync cron, ElevenLabs agent tooling scripts (`eleven-tools/*.py`), Angular 20 AI front-end using `@elevenlabs/client`.
+  - Every highlight must be backed by the CV or by code/README evidence in the user's work repositories. No invented metrics; keep the CV's metrics as stated.
+  - Include AI work the CV under-sells (verify each item in the repositories before writing), e.g. voice agents, RAG tooling, LLM evaluation, AI front-ends.
   - Add `Python` under skills only if the code confirms it.
   - Leave out email and phone (not needed in phase 1).
   - `workAuthorization`: the contractor wording from the example.

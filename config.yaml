@@ -1,0 +1,80 @@
+pollIntervalHours: 3
+maxAgeDays: 7
+
+roles:
+  # whole-word match against the normalized title (lowercase, punctuation -> space)
+  titleInclude: [ai engineer, ai ml, ml engineer, machine learning engineer, llm, applied ai, genai, generative ai,
+                 full stack, fullstack, software engineer, software developer, backend engineer, frontend engineer,
+                 product engineer, typescript, voice, conversational, agent, agents, agentic, ai developer]
+  titleExclude: [intern, internship, junior, jr, director, vp, vice president, head of, manager, sales,
+                 account executive, recruiter, designer, data scientist, qa, support, marketing, consultant, lead generation]
+
+eligibility:
+  # case-insensitive regexes, tested against location + description
+  rejectPatterns:
+    - "(must|need to|required to) (be )?(legally )?authori[sz]ed to work in the (u\\.?s\\.?a?|united states)"
+    - "(u\\.?s\\.?|united states) citizens?( or (green card|permanent resident)s?( holders?)?)? only"
+    - "must be an? (u\\.?s\\.?|united states) citizen"
+    - "\\bw-?2 (only|employees? only|position)\\b"
+    - "security clearance"
+    - "must (reside|live|be located|be based) in the (u\\.?s\\.?a?|united states)"
+    - "(only|exclusively) (open|available) to (candidates|applicants|residents) (located |based |residing )?in the (u\\.?s\\.?a?|united states)"
+  # tested against each location segment (location split on ; | ·)
+  usOnlyLocationPatterns:
+    - "^(remote\\s*[-–(,:]?\\s*)?(us|u\\.s\\.|usa|united states( of america)?)\\)?(\\s*[-–]?\\s*(only|remote))?$"
+    - "^[a-z .'-]+,\\s*(al|az|ca|co|ct|dc|fl|ga|il|ma|md|mi|mn|nc|nj|ny|oh|or|pa|tn|tx|ut|va|wa|wi)$"
+    - "^(san francisco|new york|nyc|seattle|austin|boston|los angeles|chicago|denver|miami)( bay area)?$"
+  # if any of these appear in location or description, the US-only location rule does not fire
+  allowedRegionPatterns: ["\\bm[eé]xico\\b", "\\blatam\\b", "latin america", "south america", "\\bamericas\\b",
+                          "north america", "\\bdeel\\b"]
+  # same, but tested against the location only (descriptions say "global scale", "work from anywhere in the US")
+  allowedLocationOnlyPatterns: ["worldwide", "\\banywhere\\b", "\\bglobal(ly)?\\b"]
+
+pay:
+  rejectBelowHourly: 40
+  lowPriorityBelowHourly: 50
+
+scoring:
+  provider: anthropic        # anthropic | openai
+  model: claude-haiku-4-5    # openai alternative: set provider: openai and the exact Luna model id from the OpenAI dashboard
+  threshold: 65
+  maxPerRun: 100
+  maxAttempts: 2
+  dailySpendCapUsd: 3
+
+pricing:   # USD per 1M tokens
+  claude-haiku-4-5: { input: 1, output: 5 }
+  claude-sonnet-5-5: { input: 2, output: 10 }
+  claude-opus-5-5: { input: 4, output: 20 }
+  gpt-5.6-luna: { input: 0.2, output: 1.2 }
+  gpt-5.6-terra: { input: 2, output: 12 }
+  gpt-5.6-sol: { input: 5, output: 30 }
+
+sources:
+  greenhouse: true
+  lever: true
+  ashby: true
+  remoteok: true
+  remotive: { enabled: true, categories: [software-development, artificial-intelligence] }
+  himalayas: { enabled: true, country: MX, pages: 3, queries: [ai engineer, llm, full stack, voice ai, typescript] }
+  wwr:
+    enabled: true
+    feeds:
+      - https://weworkremotely.com/categories/remote-full-stack-programming-jobs.rss
+      - https://weworkremotely.com/categories/remote-back-end-programming-jobs.rss
+
+# watchlist seed (verified 2026-10-03); grows automatically from board apply links
+seedCompanies:
+  - { ats: greenhouse, token: gitlab, name: GitLab }
+  - { ats: greenhouse, token: remotecom, name: Remote }
+  - { ats: greenhouse, token: automatticcareers, name: Automattic }
+  - { ats: greenhouse, token: elastic, name: Elastic }
+  - { ats: greenhouse, token: canonical, name: Canonical }
+  - { ats: ashby, token: zapier, name: Zapier }
+  - { ats: ashby, token: close, name: Close }
+  - { ats: ashby, token: supabase, name: Supabase }
+  - { ats: ashby, token: posthog, name: PostHog }
+  - { ats: ashby, token: vapi, name: Vapi }
+  - { ats: ashby, token: elevenlabs, name: ElevenLabs }
+  - { ats: ashby, token: livekit, name: LiveKit }
+  - { ats: lever, token: toptal, name: Toptal }
