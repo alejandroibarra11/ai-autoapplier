@@ -67,12 +67,16 @@ describe('answers', () => {
     expect(b.extraMatchers[0]!.key).toBe('email');
   });
 
-  it('accepts curly apostrophe in preferred-name matcher', () => {
+  it('accepts straight apostrophe in preferred-name matcher', () => {
     expect(matchFixedAnswer(q("What's the name you'd prefer us to use?"), a)?.key).toBe('firstName');
   });
 
   it('accepts U+2019 curly apostrophe in preferred-name matcher', () => {
-    expect(matchFixedAnswer(q("What’s the name you’d prefer us to use?"), a)?.key).toBe('firstName');
+    expect(matchFixedAnswer(q("What\u2019s the name you\u2019d prefer us to use?"), a)?.key).toBe('firstName');
+  });
+
+  it('rejects nonsense "youud prefer" pattern', () => {
+    expect(matchFixedAnswer(q("What's the name youud prefer us to use?"), a)).toBeNull();
   });
 });
 
