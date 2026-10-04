@@ -13,6 +13,9 @@ export function getDb(): Db | null {
 
 let writeDb: Db | undefined;
 export function getWriteDb(): Db {
-  writeDb ??= openDb(join(/*turbopackIgnore: true*/ findRoot(), process.env.DATABASE_PATH ?? 'data/app.db'), { migrate: false });
+  if (writeDb) return writeDb;
+  const path = join(/*turbopackIgnore: true*/ findRoot(), process.env.DATABASE_PATH ?? 'data/app.db');
+  if (!existsSync(path)) throw new Error('No database yet — run the worker first');
+  writeDb = openDb(path, { migrate: false });
   return writeDb;
 }
