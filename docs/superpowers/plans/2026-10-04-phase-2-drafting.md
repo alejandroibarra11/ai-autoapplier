@@ -20,7 +20,7 @@
 - Drafting model `claude-opus-5-5`, effort `medium`, separate daily cap `drafting.dailySpendCapUsd` (default 3), LLM usage stage `draft`.
 - Browser failures/timeouts/Cloudflare → resolved kind `manual` + common questions; drafting still proceeds.
 - `profile/answers.yaml`, `data/` (incl. `data/cv/`, `data/browser/`) are git-ignored; commit `profile/answers.example.yaml` only.
-- Never touch anything under `~/dev/contler`.
+- Never touch the employer code folder (see local agent memory); other personal projects are fine.
 - Run node/pnpm only via `mise exec -- ...`. Every commit message ends with:
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
