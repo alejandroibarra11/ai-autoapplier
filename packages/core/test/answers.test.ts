@@ -30,6 +30,19 @@ describe('answers', () => {
   ])('matches %s', (label, key) => {
     expect(matchFixedAnswer(q(label), a)?.key).toBe(key);
   });
+  it('work-authorization: "us" as a pronoun is not the country', () => {
+    expect(matchFixedAnswer(q('Are you authorized to work for us?'), a)).toBeNull();
+    expect(matchFixedAnswer(q('authorized to work for us?'), a)).toBeNull();
+    expect(matchFixedAnswer(q('Are you authorized to work in the US?'), a)?.key).toBe('workAuthorizationUS');
+    expect(matchFixedAnswer(q('authorized to work in the U.S.?'), a)?.key).toBe('workAuthorizationUS');
+    expect(matchFixedAnswer(q('Work authorization (USA)'), a)?.key).toBe('workAuthorizationUS');
+  });
+  it.each(['Location', 'location', 'Current location', 'Current Location'])('maps the bare label %s to location', (label) => {
+    expect(matchFixedAnswer(q(label), a)?.key).toBe('location');
+  });
+  it('does not map location-preference questions to location', () => {
+    expect(matchFixedAnswer(q('Are you open to relocation?'), a)).toBeNull();
+  });
   it('does not match free-text motivation questions', () => {
     expect(matchFixedAnswer(q('Why do you want to work at Acme?'), a)).toBeNull();
   });

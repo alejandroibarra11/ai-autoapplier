@@ -27,8 +27,15 @@ export type AnswerKey =
   | 'fullName' | 'firstName' | 'email' | 'phone' | 'country' | 'location' | 'timezone' | 'workAuthorizationUS'
   | 'sponsorship' | 'salaryExpectation' | 'noticePeriod' | 'englishLevel' | 'linkedin' | 'github' | 'portfolio';
 
-const DEFAULT_MATCHERS: [RegExp, AnswerKey][] = [
-  [/(?=.*(authori[sz]ed to work|work authori[sz]ation|legally (able|eligible|permitted) to work))(?=.*(united states|u\.s\.a?\.?|\busa\b|\bus\b|america))/i, 'workAuthorizationUS'],
+interface Matcher { test(label: string): boolean }
+
+const WORK_AUTH = /authori[sz]ed to work|work authori[sz]ation|legally (able|eligible|permitted) to work/i;
+const US_WORDS = /united states|u\.s\.a?\.?|\busa\b|america/i;
+// Upper-case only: "work for us?" uses the pronoun.
+const US_ABBR = /\bUS\b/;
+
+const DEFAULT_MATCHERS: [Matcher, AnswerKey][] = [
+  [{ test: (l) => WORK_AUTH.test(l) && (US_WORDS.test(l) || US_ABBR.test(l)) }, 'workAuthorizationUS'],
   [/sponsor/i, 'sponsorship'],
   [/linkedin/i, 'linkedin'],
   [/github/i, 'github'],
@@ -37,7 +44,7 @@ const DEFAULT_MATCHERS: [RegExp, AnswerKey][] = [
   [/notice period|earliest start|when can you start|start date/i, 'noticePeriod'],
   [/country of residence|which country|country are you/i, 'country'],
   [/time ?zone/i, 'timezone'],
-  [/where are you (located|based)|current location|city of residence/i, 'location'],
+  [/where are you (located|based)|current location|city of residence|^\s*location\s*$|^\s*current location\s*$/i, 'location'],
   [/english (level|proficiency|skills)|proficiency in english|rate your english|english fluency/i, 'englishLevel'],
   [/prefer(red)? name|name you['’]?d prefer/i, 'firstName'],
 ];
@@ -61,8 +68,8 @@ export function answerValue(a: Answers, key: AnswerKey): string | undefined {
 
 export function matchFixedAnswer(q: FormQuestion, a: Answers): { key: AnswerKey; value: string } | null {
   if (q.type === 'textarea') return null;
-  const matchers: [RegExp, AnswerKey][] = [
-    ...a.extraMatchers.map((m) => [new RegExp(m.pattern, 'i'), m.key] as [RegExp, AnswerKey]),
+  const matchers: [Matcher, AnswerKey][] = [
+    ...a.extraMatchers.map((m) => [new RegExp(m.pattern, 'i'), m.key] as [Matcher, AnswerKey]),
     ...DEFAULT_MATCHERS,
   ];
   for (const [re, key] of matchers) {
