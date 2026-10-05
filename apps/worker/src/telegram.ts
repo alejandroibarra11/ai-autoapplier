@@ -110,11 +110,23 @@ export interface BotOptions {
   submitTap?: (fromChatId: string | number | undefined, jobId: number, cardDry: boolean | null) => SubmitTapResult;
   /** Runs after a successful ✋ Cancel (main: sends the copy-paste messages). */
   onCancelled?: (jobId: number) => Promise<void>;
+  /** /pending: re-sends everything still waiting on the user; resolves to a one-line summary. */
+  pending?: () => Promise<string>;
 }
 
 export function createBot(token: string, chatId: string, db: Db, onReady?: (jobId: number) => Promise<void>, opts: BotOptions = {}): Bot {
   const bot = new Bot(token);
   bot.command('start', (ctx) => ctx.reply(`Chat id: ${ctx.chat.id}\nPut it in .env as TELEGRAM_CHAT_ID.`));
+  let resending = false;
+  bot.command('pending', async (ctx) => {
+    if (String(ctx.chat.id) !== chatId || !opts.pending) return;
+    if (resending) { await ctx.reply('Already re-sending, hold on…'); return; }
+    resending = true;
+    await ctx.reply('🔁 Re-sending everything waiting on you…');
+    // Background: sending can take a minute; the bot keeps answering taps meanwhile.
+    void opts.pending().then((t) => ctx.reply(t), (e) => { console.error('[telegram] /pending failed', e); return ctx.reply('⚠️ /pending failed, see the worker log'); })
+      .catch(() => {}).finally(() => { resending = false; });
+  });
   bot.command('drafts', async (ctx) => {
     if (String(ctx.chat.id) !== chatId) return;
     const n = await resendDraftCards({ sendMessage: (c, t, o) => ctx.api.sendMessage(c, t, o as never) }, chatId, db);

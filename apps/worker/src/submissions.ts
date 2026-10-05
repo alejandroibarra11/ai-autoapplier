@@ -127,8 +127,8 @@ const failedHeadline = (job: JobRow, reason: string) => (isFormRejected(reason)
 const staleText = (job: JobRow) =>
   `⚠️ The worker restarted while submitting ${jobName(job)} — check your email; if it went through tap 📨 Mark applied.`;
 
-/** Sends one notification for a submission row; false when the row needs no message (the job moved on). */
-async function notifyOne(sender: SubmissionSender, chatId: string, db: Db, cfg: SubmitCfg, job: JobRow, sub: SubmissionRow): Promise<boolean> {
+/** Sends one notification for a submission row; false when the row needs no message (the job moved on). Also used by /pending. */
+export async function notifyOne(sender: SubmissionSender, chatId: string, db: Db, cfg: SubmitCfg, job: JobRow, sub: SubmissionRow): Promise<boolean> {
   if ((sub.result === 'filled' || sub.result === 'dry_run') && job.status === 'awaiting_submit') {
     await sendFillCard(sender, chatId, job, sub, cfg.submit.dryRun, sub.submitShot ?? sub.fillShot);
     return true;

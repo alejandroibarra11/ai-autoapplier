@@ -8,6 +8,7 @@ import {
 import { createBrowserHolder, createLogThrottle } from './browser-holder';
 import { createDraftLoop, createFailureWatch } from './draft-loop';
 import { notifyDraftFailures, notifyDrafts } from './drafts';
+import { resendPending } from './pending';
 import { createMutex } from './mutex';
 import { createSubmitTaps, notifySubmissions, sendReadyAfterCancel, sendReadyUnlessAutoFill, submitAndReport, type SubmissionSender } from './submissions';
 import { bootstrap } from './bootstrap';
@@ -35,6 +36,10 @@ const bot = createBot(telegramToken, chatId ?? '', app.db, async (jobId) => {
 }, {
   submitTap,
   onCancelled: async (jobId) => { if (chatId) await sendReadyAfterCancel(draftSender, chatId, app.db, jobId); },
+  pending: async () => {
+    const c = await resendPending(draftSender, chatId ?? '', app.db, app.cfg);
+    return `✅ Re-sent: ${c.review} new jobs · ${c.drafts} drafts · ${c.submit} ready to submit · ${c.manual} to finish manually`;
+  },
 });
 const draftSender: SubmissionSender = {
   sendMessage: (c, t, o) => bot.api.sendMessage(c, t, o as never),
