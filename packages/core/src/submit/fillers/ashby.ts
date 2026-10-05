@@ -67,15 +67,37 @@ async function clickYesNo(container: Locator, value: string): Promise<boolean> {
   } catch { return false; }
 }
 
+/**
+ * Radio/checkbox groups are named `<entryId>_<fieldPath>` and the entryId prefix is regenerated on every render, so a name scraped
+ * at extraction time is stale on the next load. Resolve it through the field path: the one `[data-field-path]` entry the id ends with,
+ * whose inputs all share one name ending in `_<fieldPath>`. Anything ambiguous resolves to nothing.
+ */
+async function currentName(page: Page, fieldId: string): Promise<string> {
+  if (await page.locator(byName(fieldId)).count()) return fieldId;
+  const resolved = await page.evaluate((id) => {
+    const paths = Array.from(document.querySelectorAll('[data-field-path]')).map((el) => el.getAttribute('data-field-path') ?? '')
+      .filter((p) => p && id.length > p.length + 1 && id.endsWith('_' + p));
+    if (!paths.length) return null;
+    const path = paths.sort((a, b) => b.length - a.length)[0]!;
+    const boxes = Array.from(document.querySelectorAll('[data-field-path]')).filter((el) => el.getAttribute('data-field-path') === path);
+    if (boxes.length !== 1) return null;
+    const names = new Set(Array.from(boxes[0]!.querySelectorAll('input[type="radio"][name], input[type="checkbox"][name]'))
+      .map((el) => el.getAttribute('name') ?? '').filter((n) => n.endsWith('_' + path)));
+    return names.size === 1 ? [...names][0]! : null;
+  }, fieldId).catch(() => null);
+  return resolved ?? fieldId;
+}
+
 async function fillCustom(page: Page, e: FillEntry): Promise<boolean | null> {
-  const s = `${byName(e.fieldId)}, input[type="file"][id="${e.fieldId.replace(/["\\]/g, '\\$&')}"]`;
+  const name = await currentName(page, e.fieldId);
+  const s = `${byName(name)}, input[type="file"][id="${e.fieldId.replace(/["\\]/g, '\\$&')}"]`;
   const first = page.locator(s).first();
   if (!(await page.locator(s).count())) return null;
   const { tag, type, hasButtons } = await first.evaluate((el) => ({
     tag: el.tagName.toLowerCase(), type: (el.getAttribute('type') ?? '').toLowerCase(),
     hasButtons: !!el.parentElement?.querySelector('button[aria-pressed], button[data-option]'),
   }));
-  const sole = byName(e.fieldId);
+  const sole = byName(name);
   if (tag === 'select') return selectNativeVerified(page, sole, e.value);
   if (type === 'file') return setFile(page, s, e.value);
   if (type === 'checkbox' && hasButtons) return clickYesNo(first.locator('xpath=..'), e.value);
