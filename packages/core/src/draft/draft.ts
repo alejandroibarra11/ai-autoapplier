@@ -40,6 +40,9 @@ function profileProse(p: Profile): string {
   return [p.headline, p.summary, ...p.experience.flatMap((e) => e.highlights), ...p.projects.flatMap((pr) => [pr.name, pr.summary])].join('\n');
 }
 
+/** A sentence stating a gap or a plan to learn something, e.g. "I haven't used Go professionally", "I'd ramp up on Rails". */
+const GAP_SENTENCE = /\b(haven'?t|have not|hasn'?t|has not|never|not (yet )?(used|worked|written|built)|no (direct |professional |production |hands-on )?experience|don'?t have|do not have|lack|gaps?|ramp(ing)? up|get up to speed|pick(ing)? up|learn(ing)?|new to|unfamiliar|focused effort|aren'?t|isn'?t|not (proficient|familiar|part)|rather than|instead of)\b/i;
+
 /** True when the term is (a whole-word part of) a profile skill/stack entry, or appears as a whole word in the profile prose. */
 export function profileSupports(profile: Profile, term: string): boolean {
   const t = term.trim().toLowerCase();
@@ -107,11 +110,16 @@ export async function draftJob(ctx: DraftContext): Promise<DraftResult> {
     flagged.add(t.toLowerCase());
     flags.push(`unverified claim: ${t}`);
   };
-  out.claimedSkills.forEach(checkClaim);
-  // Ambiguous terms (CASE_SENSITIVE_TERMS) match case-sensitively so ordinary words ("rust belt") do not trip the scan.
   // In answersOnly mode the cover letter is discarded, so only the answers are scanned.
   const prose = [ctx.answersOnly ? '' : out.coverLetter, ...generated.map((g) => g.answer)].join('\n');
-  for (const term of TECH_TERMS) if (termRegex(term, CASE_SENSITIVE_TERMS.has(term) ? '' : 'i').test(prose)) checkClaim(term);
+  // Sentences that state a gap or an intent to learn ("I haven't used Terraform") are honest, not claims: scan only the others.
+  const sentences = prose.split(/(?<=[.!?])\s+|\n+/);
+  const claims = sentences.filter((x) => !GAP_SENTENCE.test(x)).join('\n');
+  const termRe = (term: string) => termRegex(term, CASE_SENSITIVE_TERMS.has(term) ? '' : 'i');
+  // A listed skill named only in gap sentences is not a claim; one missing from the text entirely is still checked.
+  out.claimedSkills.forEach((t) => { if (termRe(t.trim()).test(claims) || !termRe(t.trim()).test(prose)) checkClaim(t); });
+  // Ambiguous terms (CASE_SENSITIVE_TERMS) match case-sensitively so ordinary words ("rust belt") do not trip the scan.
+  for (const term of TECH_TERMS) if (termRe(term).test(claims)) checkClaim(term);
 
   const sortedAnswers = () => [...fixed, ...generated].sort((a, b) =>
     ctx.questions.findIndex((q) => q.id === a.questionId) - ctx.questions.findIndex((q) => q.id === b.questionId));

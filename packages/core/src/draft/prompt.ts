@@ -22,7 +22,7 @@ RULES
 - answers: one entry per question listed under QUESTIONS TO ANSWER, by questionId. For questions with options, answer with exactly one option text (for multiselect, option texts separated by "; "). Keep free-text answers under 120 words.
 - bulletIds: the 4-8 most relevant bullet ids, most relevant first, max 6 per role.
 - skillsOrder: skill group keys, most relevant first.
-- claimedSkills: every technology, tool or skill you mention in coverLetter or answers.${opts.answersOnly ? `
+- claimedSkills: every technology, tool or skill you claim experience with in coverLetter or answers (not ones you say you lack or would learn).${opts.answersOnly ? `
 - THIS REQUEST IS ANSWERS ONLY (the application is already drafted): coverLetter: empty string; bulletIds: []; skillsOrder: []. Answer only the questions listed.` : ''}`;
 }
 

@@ -148,6 +148,21 @@ describe('draftJob extra checks', () => {
     const d = await draftJob(ctx(new Fake([{ ...good, coverLetter: 'I deployed Kubernetes.', claimedSkills: ['kubernetes'] }])));
     expect(d.flags).toEqual(['unverified claim: kubernetes']);
   });
+  it('does not flag terms named only in honest gap / learning sentences', async () => {
+    const coverLetter = "To be direct about gaps: I haven't used Terraform or Kubernetes in production. I have not worked with Ruby on Rails. "
+      + 'I learn new stacks quickly and would put focused effort into Rails from day one. My gap is direct experience with Databricks. '
+      + "Java and Go aren't part of my stack. My cloud experience is GCP rather than Azure.";
+    const r = await draftJob(ctx(new Fake([{ ...good, coverLetter, claimedSkills: ['Terraform', 'Kubernetes', 'Ruby on Rails', 'Rails', 'Databricks', 'Java', 'Go', 'Azure'] }])));
+    expect(r.flags).toEqual([]);
+  });
+  it('still flags a term claimed in a positive sentence even if a gap sentence also names it', async () => {
+    const r = await draftJob(ctx(new Fake([{ ...good, coverLetter: "I deployed Kubernetes clusters. I haven't used Terraform.", claimedSkills: [] }])));
+    expect(r.flags).toEqual(['unverified claim: Kubernetes']);
+  });
+  it('still flags a listed claimed skill that never appears in the text', async () => {
+    const r = await draftJob(ctx(new Fake([{ ...good, coverLetter: 'I build APIs.', claimedSkills: ['Terraform'] }])));
+    expect(r.flags).toEqual(['unverified claim: Terraform']);
+  });
   it('stores generated choice answers as canonical option text', async () => {
     const qs: FormQuestion[] = [{ id: 'q_x', label: 'Relocate?', type: 'select', required: true, options: ['Yes', 'No'] }];
     const r = await draftJob({ ...ctx(new Fake([{ ...good, answers: [{ questionId: 'q_x', answer: 'no' }] }])), questions: qs });
