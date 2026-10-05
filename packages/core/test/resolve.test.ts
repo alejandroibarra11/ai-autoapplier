@@ -4,7 +4,7 @@ import { extractQuestions } from '../src/apply/questions';
 import { COMMON_QUESTIONS } from '../src/apply/common';
 import type { PageOpener } from '../src/browser';
 
-const job = (applyUrl: string, extra = {}) => ({ applyUrl, ats: null, atsToken: null, sourceJobId: 'x', source: 'himalayas', ...extra });
+const job = (applyUrl: string, extra = {}) => ({ applyUrl, ats: null, atsToken: null, sourceJobId: 'x', source: 'himalayas', company: 'Clera', title: 'Senior Voice AI Engineer', ...extra });
 const opener = (pages: Record<string, { title?: string; finalUrl?: string; links?: { href: string; text: string }[] }>, fail = false): PageOpener => ({
   async visit(url) {
     if (fail) throw new Error('timeout');
@@ -52,6 +52,41 @@ describe('resolveApplyTarget', () => {
       'https://careers.acme.com/apply/1': {},
     }));
     expect(t).toEqual({ kind: 'other', url: 'https://careers.acme.com/apply/1' });
+  });
+});
+
+describe('resolveApplyTarget board fallback', () => {
+  const hit = { kind: 'ashby' as const, url: 'https://jobs.ashbyhq.com/clera/u-1', atsToken: 'clera', atsJobId: 'u-1' };
+  const lookup = (r: typeof hit | null | Error) => {
+    const calls: { company: string; title: string }[] = [];
+    const fn = async (j: { company: string; title: string }) => { calls.push({ company: j.company, title: j.title }); if (r instanceof Error) throw r; return r; };
+    return Object.assign(fn, { calls });
+  };
+  it('falls back to the company board on a Cloudflare challenge', async () => {
+    const l = lookup(hit);
+    const t = await resolveApplyTarget(job('https://himalayas.app/j'), opener({ 'https://himalayas.app/j': { title: 'Just a moment...' } }), l);
+    expect(t).toEqual(hit);
+    expect(l.calls).toEqual([{ company: 'Clera', title: 'Senior Voice AI Engineer' }]);
+  });
+  it('falls back without a browser, on browser errors, and for other (non-ATS) sites', async () => {
+    expect(await resolveApplyTarget(job('https://himalayas.app/j'), null, lookup(hit))).toEqual(hit);
+    expect(await resolveApplyTarget(job('https://himalayas.app/j'), opener({}, true), lookup(hit))).toEqual(hit);
+    expect(await resolveApplyTarget(job('https://himalayas.app/j'), opener({
+      'https://himalayas.app/j': { links: [{ href: 'https://careers.acme.com/apply/1', text: 'Apply' }] },
+    }), lookup(hit))).toEqual(hit);
+  });
+  it('keeps manual/other when the board has no unique match or the lookup throws', async () => {
+    expect(await resolveApplyTarget(job('https://himalayas.app/j'), null, lookup(null))).toEqual({ kind: 'manual', url: 'https://himalayas.app/j' });
+    expect(await resolveApplyTarget(job('https://himalayas.app/j'), null, lookup(new Error('boom')))).toEqual({ kind: 'manual', url: 'https://himalayas.app/j' });
+    const t = await resolveApplyTarget(job('https://himalayas.app/j'), opener({
+      'https://himalayas.app/j': { links: [{ href: 'https://careers.acme.com/apply/1', text: 'Apply' }] },
+    }), lookup(null));
+    expect(t).toEqual({ kind: 'other', url: 'https://careers.acme.com/apply/1' });
+  });
+  it('does not consult the board when the direct/hop logic finds an ATS', async () => {
+    const l = lookup(hit);
+    expect((await resolveApplyTarget(job('https://jobs.lever.co/t/1'), null, l)).kind).toBe('lever');
+    expect(l.calls).toEqual([]);
   });
 });
 

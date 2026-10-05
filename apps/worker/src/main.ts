@@ -2,8 +2,8 @@ import { join } from 'node:path';
 import cron from 'node-cron';
 import { InputFile } from 'grammy';
 import {
-  createProvider, extractQuestions, hasDraftWork, listJobsForFilling, makePageOpener, openBrowser, renderPdf as renderPdfWith,
-  resetStaleFillSubmit, resolveApplyTarget, runDrafting, runFill, runSubmit, type PageFactory,
+  createProvider, extractQuestions, hasDraftWork, listJobsForFilling, makeBoardLookup, makePageOpener, openBrowser, renderPdf as renderPdfWith,
+  resetStaleFillSubmit, resolveApplyTarget, runBoardRelookup, runDrafting, runFill, runSubmit, type PageFactory,
 } from '@autoapplier/core';
 import { createBrowserHolder, createLogThrottle } from './browser-holder';
 import { createDraftLoop, createFailureWatch } from './draft-loop';
@@ -69,6 +69,8 @@ async function tick() {
 }
 
 const draftProvider = createProvider(app.cfg.drafting.provider);
+// Company's public ATS board (read-only JSON GETs) when the job-board page can't be resolved.
+const boardLookup = makeBoardLookup(app.db, fetch);
 const STALE_FILL_SUBMIT_MS = 15 * 60_000;
 const draftCapGate = createDailyGate();
 const throttleLaunchLog = createLogThrottle(60 * 60_000);
@@ -84,7 +86,7 @@ const draftLoop = createDraftLoop({
     const r = await runDrafting({
       db: app.db, cfg: app.cfg, provider: draftProvider, profile: app.profile, answers: app.answers,
       cvDir: join(app.root, 'data/cv'),
-      resolve: (job) => resolveApplyTarget(job, opener),
+      resolve: (job) => resolveApplyTarget(job, opener, boardLookup),
       questions: (t) => extractQuestions(t, opener),
       renderPdf: async (html, out) => { if (!session) throw new Error('no browser'); await renderPdfWith(session, html, out); },
     });
@@ -96,6 +98,15 @@ const draftLoop = createDraftLoop({
       if (r.capped && draftCapGate(new Date())) {
         await draftSender.sendMessage(chatId, `⚠️ Daily drafting spend cap ($${app.cfg.drafting.dailySpendCapUsd}) reached; drafts paused until tomorrow (UTC).`).catch((e) => console.error('[draft] cap warning failed', e));
       }
+    }
+
+    // One-time board re-resolve of drafted/approved manual/other jobs (no browser, status unchanged); approved jobs that
+    // turn into Greenhouse/Lever/Ashby are filled just below.
+    try {
+      const b = await runBoardRelookup({ db: app.db, lookup: boardLookup });
+      if (b.matched) console.log(`[board] re-resolved ${b.matched}/${b.checked} manual job(s) via company ATS boards`);
+    } catch (e) {
+      console.error('[board] re-resolve error', e);
     }
 
     // Fill (never submits): approved Greenhouse/Lever/Ashby jobs → awaiting_submit with a screenshot, or needs_manual.

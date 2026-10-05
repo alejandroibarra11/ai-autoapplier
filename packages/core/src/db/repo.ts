@@ -5,7 +5,7 @@ import type { FillPlan, FilledReport, SubmissionResult } from '../submit/types';
 import type { DraftAnswer, FormQuestion, CvSelection, ResolvedKind } from '../apply/types';
 import type { Ats, JobStatus, NormalizedJob } from '../types';
 import type { ScorePayload } from '../score/schema';
-import { dedupeKey } from '../text';
+import { dedupeKey, normalizeKey } from '../text';
 
 export type JobRow = typeof jobs.$inferSelect;
 export type CompanyRow = typeof companies.$inferSelect;
@@ -189,6 +189,36 @@ export function listJobsForDrafting(db: Db, limit: number): JobRow[] {
 
 export function setResolved(db: Db, jobId: number, url: string, kind: ResolvedKind): void {
   db.update(jobs).set({ resolvedApplyUrl: url, resolvedKind: kind }).where(eq(jobs.id, jobId)).run();
+}
+
+/** draft_ready / ready_to_apply jobs resolved to manual/other that never had the one-time company-board re-resolve. */
+export function listJobsForBoardRelookup(db: Db, limit: number): JobRow[] {
+  return db.select().from(jobs)
+    .where(and(inArray(jobs.status, ['draft_ready', 'ready_to_apply']), inArray(jobs.resolvedKind, ['manual', 'other']), isNull(jobs.boardLookupAt)))
+    .orderBy(asc(jobs.id)).limit(limit).all();
+}
+
+export function markBoardLookup(db: Db, jobId: number, now = new Date()): void {
+  db.update(jobs).set({ boardLookupAt: now }).where(eq(jobs.id, jobId)).run();
+}
+
+/** A job_events note that leaves the status (and updatedAt) as they are. */
+export function addJobNote(db: Db, jobId: number, note: string, now = new Date()): void {
+  db.transaction((tx) => {
+    const cur = tx.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId)).get();
+    if (!cur) throw new Error(`job ${jobId} not found`);
+    tx.insert(jobEvents).values({ jobId, fromStatus: cur.status, toStatus: cur.status, note, at: now }).run();
+  });
+}
+
+/** Greenhouse/Lever/Ashby boards already known for a company name (companies table, any active state). */
+export function knownBoardsFor(db: Db, company: string): { ats: 'greenhouse' | 'lever' | 'ashby'; token: string }[] {
+  const key = normalizeKey(company);
+  if (!key) return [];
+  return db.select({ ats: companies.ats, token: companies.token, name: companies.name }).from(companies)
+    .where(inArray(companies.ats, ['greenhouse', 'lever', 'ashby'])).all()
+    .filter((c) => normalizeKey(c.name) === key)
+    .map((c) => ({ ats: c.ats as 'greenhouse' | 'lever' | 'ashby', token: c.token }));
 }
 
 export function resetStaleDrafting(db: Db, olderThan: Date, now = new Date()): number {

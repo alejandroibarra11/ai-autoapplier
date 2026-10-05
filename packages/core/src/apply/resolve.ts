@@ -26,14 +26,28 @@ function pickApplyLink(links: { href: string; text: string }[], from: string): s
     ?? null;
 }
 
+/** Looks the job up on its company's public ATS board; null when there is no unique match. */
+export type BoardLookup = (job: Pick<JobRow, 'company' | 'title'>) => Promise<ApplyTarget | null>;
+
+/**
+ * Direct ATS link, else follow the board page (up to MAX_HOPS) in the browser. When that ends in manual/other
+ * (challenge page, no ATS link, browser error, no browser) the company's public ATS board is tried via `lookup`.
+ */
 export async function resolveApplyTarget(
-  job: Pick<JobRow, 'applyUrl' | 'ats' | 'atsToken' | 'sourceJobId' | 'source'>, opener: PageOpener | null,
+  job: Pick<JobRow, 'applyUrl' | 'ats' | 'atsToken' | 'sourceJobId' | 'source' | 'company' | 'title'>,
+  opener: PageOpener | null, lookup?: BoardLookup,
 ): Promise<ApplyTarget> {
-  const direct = targetFromUrl(job.applyUrl);
+  const t = await resolveViaPages(job.applyUrl, opener);
+  if ((t.kind !== 'manual' && t.kind !== 'other') || !lookup) return t;
+  try { return (await lookup(job)) ?? t; } catch { return t; }
+}
+
+async function resolveViaPages(applyUrl: string, opener: PageOpener | null): Promise<ApplyTarget> {
+  const direct = targetFromUrl(applyUrl);
   if (direct) return direct;
-  const manual: ApplyTarget = { kind: 'manual', url: job.applyUrl };
+  const manual: ApplyTarget = { kind: 'manual', url: applyUrl };
   if (!opener) return manual;
-  let url = job.applyUrl;
+  let url = applyUrl;
   try {
     for (let hop = 0; hop <= MAX_HOPS; hop++) {
       const v = await opener.visit(url);

@@ -67,7 +67,7 @@ if (cmd === 'once') {
   }
 } else if (cmd === 'draft') {
   const id = Number(process.argv[3]);
-  const { getJob, setStatus, runDrafting, resolveApplyTarget, extractQuestions, openBrowser, makePageOpener, renderPdf, latestDraft } = await import('@autoapplier/core');
+  const { getJob, setStatus, runDrafting, resolveApplyTarget, makeBoardLookup, extractQuestions, openBrowser, makePageOpener, renderPdf, latestDraft } = await import('@autoapplier/core');
   const { join } = await import('node:path');
   const { cliDraftRefusal } = await import('./drafts');
   const job = Number.isInteger(id) ? getJob(app.db, id) : null;
@@ -85,7 +85,7 @@ if (cmd === 'once') {
         const r = await runDrafting({
           db: app.db, cfg: app.cfg, provider: createProvider(app.cfg.drafting.provider), profile: app.profile, answers: app.answers,
           cvDir: join(app.root, 'data/cv'), onlyJobId: id,
-          resolve: (j) => resolveApplyTarget(j, opener), questions: (t) => extractQuestions(t, opener),
+          resolve: (j) => resolveApplyTarget(j, opener, makeBoardLookup(app.db, fetch)), questions: (t) => extractQuestions(t, opener),
           renderPdf: async (html, out) => { if (!session) throw new Error('no browser'); await renderPdf(session, html, out); },
         });
         console.log(r);
