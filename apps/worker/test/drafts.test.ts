@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { openDb, insertJobs, listJobsByStatus, setStatus, insertDraft, getJob, latestDraft, type DraftInput } from '@autoapplier/core';
-import { cliDraftRefusal, confirmOverrideKeyboard, draftKeyboard, formatDraftCard, formatDraftFailure, formatReadyMessages, handleDraftAction, notifyDraftFailures, notifyDrafts, parseDraftCallback, resendDraftCards, sendReady } from '../src/drafts';
+import { cliDraftRefusal, confirmOverrideKeyboard, draftKeyboard, formatDraftCard, formatDraftFailure, formatReadyItems, formatReadyMessages, handleDraftAction, notifyDraftFailures, notifyDrafts, parseDraftCallback, resendDraftCards, sendReady } from '../src/drafts';
 
 function setup(flags: string[] = [], coverLetter = 'I build <LLM> tools & agents.') {
   const db = openDb(':memory:');
@@ -43,7 +43,7 @@ describe('ready messages', () => {
     const msgs = formatReadyMessages(getJob(db, id)!, latestDraft(db, id)!).join('\n');
     expect(msgs).toContain('https://jobs.ashbyhq.com/vapi/1');
     expect(msgs).toContain('Why &lt;Vapi&gt;?');
-    expect(msgs).toContain('<code>Because &amp; so</code>');
+    expect(msgs).toContain('<pre>Because &amp; so</pre>');
   });
   it('split long content into chunks of at most 4000 chars', () => {
     const { db, id } = setup([], 'word '.repeat(1500));
@@ -139,7 +139,7 @@ describe('safe chunking', () => {
     expect(msgs.join('\n')).toContain('Long? (cont.)');
     for (const m of msgs) {
       expect(m.length).toBeLessThanOrEqual(4000);
-      expect(count(m, /<code>/g)).toBe(count(m, /<\/code>/g));
+      expect(count(m, /<pre>/g)).toBe(count(m, /<\/pre>/g));
       expect(m.replace(/<\/?(?:b|code|pre)>/g, '')).toMatch(/^(?:[^&]|&(?:amp|lt|gt|quot);)*$/);
     }
   });
@@ -161,8 +161,8 @@ describe('sendReady resilience', () => {
     expect(total).toBeGreaterThan(2);
     await sendReady(sender, '42', getJob(db, id)!, latestDraft(db, id)!);
     expect(sent.length).toBe(total - 1);
-    expect(sent.filter((s) => s.markup).length).toBe(1);
-    expect(sent[sent.length - 1]!.markup).toBeTruthy();
+    expect(sent.filter((s) => JSON.stringify(s.markup ?? '').includes('ma:')).length).toBe(1);
+    expect(JSON.stringify(sent[sent.length - 1]!.markup)).toContain('ma:');
   });
   it('sends a trailing button message if the last send fails', async () => {
     const { db, id } = setup();
@@ -177,8 +177,26 @@ describe('sendReady resilience', () => {
       sendDocument: async () => {},
     };
     await sendReady(sender, '42', getJob(db, id)!, latestDraft(db, id)!);
-    expect(sent.filter((s) => s.markup).length).toBe(1);
+    expect(sent.filter((s) => JSON.stringify(s.markup ?? '').includes('ma:')).length).toBe(1);
     expect(sent[sent.length - 1]!.text).toContain('Mark applied');
+  });
+});
+
+describe('copy buttons', () => {
+  it('one message per answer; short answers and the link get a copy_text button, long ones do not', async () => {
+    const s = setup();
+    insertDraft(s.db, {
+      jobId: s.id, model: 'm', coverLetter: 'long letter '.repeat(40), cvPdfPath: null, flags: [], questions: [], cvSelection: { skillsOrder: [], bulletIds: [] },
+      answers: [{ questionId: 'a', label: 'Short?', answer: 'Yes & no', source: 'generated' }, { questionId: 'b', label: 'Long?', answer: 'x'.repeat(300), source: 'generated' }],
+    });
+    const items = formatReadyItems(getJob(s.db, s.id)!, latestDraft(s.db, s.id)!);
+    expect(items.map((i) => i.copy)).toEqual(['https://jobs.ashbyhq.com/vapi/1', 'Yes & no', undefined, undefined]);
+    const sent: { text: string; markup?: any }[] = [];
+    await sendReady({ sendMessage: async (_c: string, text: string, o?: any) => { sent.push({ text, markup: o?.reply_markup }); }, sendDocument: async () => {} } as any, '42', getJob(s.db, s.id)!, latestDraft(s.db, s.id)!);
+    expect(sent.length).toBe(4);
+    expect(sent[1]!.markup.inline_keyboard[0][0]).toMatchObject({ text: '📋 Copy', copy_text: { text: 'Yes & no' } });
+    expect(sent[2]!.markup).toBeUndefined();
+    expect(JSON.stringify(sent[3]!.markup)).toContain(`ma:${s.id}`);
   });
 });
 

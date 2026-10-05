@@ -66,31 +66,39 @@ function splitByEscaped(text: string, budget = ESC_BUDGET): string[] {
   return out.length ? out : [''];
 }
 
-function pack(blocks: string[]): string[] {
-  const out: string[] = [];
-  let cur = '';
-  for (const b of blocks) {
-    if (cur && cur.length + b.length + 2 > LIMIT) { out.push(cur); cur = ''; }
-    cur = cur ? `${cur}\n\n${b}` : b;
-  }
-  if (cur) out.push(cur);
-  return out;
-}
-
 function pieceBlocks(label: string, text: string, tag: 'pre' | 'code'): string[] {
   const l = escapeHtml(truncate(label, 200));
   return splitByEscaped(text).map((p, i) =>
     `<b>${l}${i > 0 ? ' (cont.)' : ''}</b>\n<${tag}>${escapeHtml(p)}</${tag}>`);
 }
 
-export function formatReadyMessages(job: JobRow, draft: DraftRow): string[] {
+/** Telegram's copy_text button holds at most 256 characters. */
+const COPY_MAX = 256;
+export interface ReadyItem { text: string; copy?: string }
+
+/**
+ * The copy-paste messages: the link, then one message per answer and the cover letter, each in a <pre> block (Telegram
+ * shows a Copy control on code blocks). Answers short enough also get a 📋 Copy button. Long texts split into (cont.) pieces.
+ */
+export function formatReadyItems(job: JobRow, draft: DraftRow): ReadyItem[] {
   const url = job.resolvedApplyUrl ?? job.applyUrl;
-  const blocks = [
-    `🚀 <b>Ready to apply:</b> ${escapeHtml(truncate(job.title, 200))} — ${escapeHtml(truncate(job.company, 200))}\n${escapeHtml(truncate(url, 1000))}`,
-    ...draft.answers.flatMap((a) => pieceBlocks(a.label, a.answer, 'code')),
-    ...pieceBlocks('Cover letter', draft.coverLetter, 'pre'),
+  const copyOf = (t: string) => (Array.from(t).length <= COPY_MAX && t.trim() ? t : undefined);
+  const piece = (label: string, text: string): ReadyItem[] => {
+    const blocks = pieceBlocks(label, text, 'pre');
+    const copy = blocks.length === 1 ? copyOf(text) : undefined;
+    return blocks.map((b) => (copy ? { text: b, copy } : { text: b }));
+  };
+  const head = `🚀 <b>Ready to apply:</b> ${escapeHtml(truncate(job.title, 200))} — ${escapeHtml(truncate(job.company, 200))}\n${escapeHtml(truncate(url, 1000))}`;
+  const link = copyOf(url);
+  return [
+    link ? { text: head, copy: link } : { text: head },
+    ...draft.answers.flatMap((a) => piece(a.label, a.answer)),
+    ...piece('Cover letter', draft.coverLetter),
   ];
-  return pack(blocks);
+}
+
+export function formatReadyMessages(job: JobRow, draft: DraftRow): string[] {
+  return formatReadyItems(job, draft).map((i) => i.text);
 }
 
 const DRAFT_ACTIONS = { ap: 'approve', ao: 'override', sd: 'skip', ma: 'applied' } as const;
@@ -177,14 +185,16 @@ export async function resendDraftCards(sender: MessageSender, chatId: string, db
 }
 
 export async function sendReady(sender: DraftSender, chatId: string, job: JobRow, draft: DraftRow): Promise<void> {
-  const msgs = formatReadyMessages(job, draft);
-  const button = () => ({ parse_mode: 'HTML' as const, link_preview_options: { is_disabled: true }, reply_markup: new InlineKeyboard().text('📨 Mark applied', `ma:${job.id}`).text('⏭ Skip', `sd:${job.id}`) });
-  const plain = { parse_mode: 'HTML' as const, link_preview_options: { is_disabled: true } };
+  const msgs = formatReadyItems(job, draft);
+  const opts = (kb?: InlineKeyboard) => ({ parse_mode: 'HTML' as const, link_preview_options: { is_disabled: true }, ...(kb ? { reply_markup: kb } : {}) });
+  const doneRow = (kb: InlineKeyboard) => kb.text('📨 Mark applied', `ma:${job.id}`).text('⏭ Skip', `sd:${job.id}`);
+  const button = () => opts(doneRow(new InlineKeyboard()));
   let lastDelivered = -1;
   for (const [i, m] of msgs.entries()) {
     const last = i === msgs.length - 1;
+    const copy = m.copy ? new InlineKeyboard().copyText('📋 Copy', m.copy) : undefined;
     try {
-      await sender.sendMessage(chatId, m, last ? button() : plain);
+      await sender.sendMessage(chatId, m.text, opts(last ? doneRow(copy ? copy.row() : new InlineKeyboard()) : copy));
       lastDelivered = i;
     } catch (e) {
       console.error(`[telegram] ready message ${i + 1}/${msgs.length} failed for job #${job.id}:`, e instanceof Error ? e.message : e);
