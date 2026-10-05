@@ -23,12 +23,54 @@ async function inputByTitle(page: Page, re: RegExp): Promise<string | null> {
   return null;
 }
 
+const planCountry = (plan: FillPlan): string => {
+  const c = plan.entries.find((x) => x.fieldId === 'identity:country')?.value.trim();
+  if (c) return c;
+  const loc = plan.entries.find((x) => x.fieldId === 'identity:location')?.value ?? '';
+  return loc.includes(',') ? loc.split(',').at(-1)!.trim() : '';
+};
+
+/**
+ * Custom (non-system) place questions are unnamed widgets, so the scraped plan never holds them. Find the one entry whose title names a
+ * location/country and whose only input is an unnamed combobox or select. `country`: the title or description mentions a country
+ * (e.g. "Location — Country you're currently residing in"); `location`: a location title that does not. Returns its widget selector.
+ */
+async function customPlaceField(page: Page, kind: 'country' | 'location'): Promise<string | null> {
+  const paths = await page.locator('[data-field-path]').evaluateAll((els, k) => els.filter((f) => {
+    const path = f.getAttribute('data-field-path') ?? '';
+    if (!path || path.startsWith('_systemfield_') || f.querySelector('input[name], select[name], textarea[name]')) return false;
+    if (!f.querySelector('input[role="combobox"], select')) return false;
+    const title = (f.querySelector('label')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    const desc = (f.querySelector('[class*="description"]')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    if (!/\b(location|country)\b/i.test(title)) return false;
+    return /\bcountry\b/i.test(title + ' ' + desc) === (k === 'country');
+  }).map((f) => f.getAttribute('data-field-path') ?? ''), kind);
+  if (paths.length !== 1) return null;
+  const box = `[data-field-path="${paths[0]!.replace(/["\\]/g, '\\$&')}"]`;
+  return (await page.locator(`${box} input[role="combobox"]`).count()) ? `${box} input[role="combobox"]` : `${box} select`;
+}
+
+/** Country only, exact option (alias-aware read-back via lastSegmentIs); no option means failed, never a guess. */
+async function chooseCountry(page: Page, sel: string, country: string): Promise<boolean> {
+  if (!country) return false;
+  if (sel.endsWith(' select')) {
+    const labels = await page.locator(sel).first().evaluate((el) => Array.from((el as HTMLSelectElement).options).map((o) => o.label)).catch(() => [] as string[]);
+    const exact = labels.find((l) => norm(l) === norm(country));
+    return exact ? selectNativeVerified(page, sel, exact) : false;
+  }
+  return chooseCombobox(page, sel, country, { accept: (t) => lastSegmentIs(t, country) });
+}
+
 async function fillLocation(page: Page, plan: FillPlan, e: FillEntry): Promise<boolean | null> {
-  const sel = '[data-field-path="_systemfield_location"] input[role="combobox"]';
-  if (!(await page.locator(sel).count())) return null;
+  let sel = '[data-field-path="_systemfield_location"] input[role="combobox"]';
+  if (!(await page.locator(sel).count())) {
+    const custom = await customPlaceField(page, 'location');
+    if (!custom) return null;
+    if (custom.endsWith(' select')) return chooseCountry(page, custom, planCountry(plan));
+    sel = custom;
+  }
   const city = oneLine(e.value.split(',')[0]!);
-  const planCountry = plan.entries.find((x) => x.fieldId === 'identity:country')?.value.trim();
-  const country = planCountry || (e.value.includes(',') ? e.value.split(',').at(-1)!.trim() : '');
+  const country = planCountry(plan);
   if (!city || !country) return false;
   if (await chooseCombobox(page, sel, city, { allowContains: true, accept: (t) => lastSegmentIs(t, country) })) return true;
   // some boards ask "What country are you based in?": the list holds countries only, so retry with the country (exact option match)
@@ -45,6 +87,10 @@ async function fillIdentity(page: Page, plan: FillPlan, e: FillEntry): Promise<b
       return null;
     }
     case 'identity:location': return fillLocation(page, plan, e);
+    case 'identity:country': {
+      const sel = await customPlaceField(page, 'country');
+      return sel ? chooseCountry(page, sel, oneLine(e.value)) : null;
+    }
     case 'identity:resume': return (await page.locator('input#_systemfield_resume').count()) ? setFile(page, 'input#_systemfield_resume', e.value) : null;
     default: {
       const key = URL_TITLES[e.fieldId];
@@ -117,8 +163,27 @@ async function fillCustom(page: Page, e: FillEntry): Promise<boolean | null> {
   return fillText(page, sole, e.value);
 }
 
-/** Required Yes/No questions with neither button pressed (their hidden checkbox carries no `required`). Plain string: no __name from tsx. */
-const REQUIRED_YESNO_JS = `(() => Array.from(document.querySelectorAll('[data-field-path]')).filter((f) => f.querySelector('button[aria-pressed]') && f.querySelector('label[class*="required"]') && !f.querySelector('button[aria-pressed="true"]')).map((f) => (f.querySelector('label')?.textContent ?? '').replace(/\\s+/g, ' ').trim()))()`;
+/**
+ * Visible field entries whose title carries Ashby's required marker but hold no value. Ashby marks many required questions only on the
+ * label: Yes/No buttons (hidden checkbox), radio groups, unnamed autocomplete comboboxes. Entries with a required/aria-required input are
+ * left to the generic check (no duplicates). Plain string: no __name from tsx.
+ */
+const REQUIRED_ENTRIES_JS = `(() => Array.from(document.querySelectorAll('[data-field-path]')).filter((f) => {
+  const title = f.querySelector('label');
+  if (!title || !/required/i.test(title.className)) return false;
+  if (f.querySelector('input[required], textarea[required], select[required], [aria-required="true"]')) return false;
+  const b = f.getBoundingClientRect(); const s = getComputedStyle(f);
+  if (s.display === 'none' || s.visibility === 'hidden' || (b.width === 0 && b.height === 0)) return false;
+  if (f.querySelector('button[aria-pressed="true"]')) return false;
+  if ((f.querySelector('[class*="single-value"], [class*="singleValue"]')?.textContent ?? '').trim()) return false;
+  return !Array.from(f.querySelectorAll('input, textarea, select')).some((i) => {
+    const t = (i.getAttribute('type') ?? '').toLowerCase();
+    if (t === 'hidden' || t === 'button' || t === 'submit') return false;
+    if (t === 'radio' || t === 'checkbox') return i.checked;
+    if (t === 'file') return (i.files?.length ?? 0) > 0;
+    return !!(i.value ?? '').trim();
+  });
+}).map((f) => (f.querySelector('label')?.textContent ?? '').replace(/\\s+/g, ' ').replace(/[*✱]+\\s*$/, '').trim()))()`;
 
 export const ashbyFiller: AtsFiller = {
   kind: 'ashby',
@@ -126,7 +191,7 @@ export const ashbyFiller: AtsFiller = {
 
   async fill(page: Page, plan: FillPlan): Promise<FilledReport> {
     return runFill(page, plan, plan.entries, (e) => (e.fieldId.startsWith('identity:') ? fillIdentity(page, plan, e) : fillCustom(page, e)),
-      (p) => p.evaluate(REQUIRED_YESNO_JS) as Promise<string[]>);
+      (p) => p.evaluate(REQUIRED_ENTRIES_JS) as Promise<string[]>);
   },
 
   async submit(page: Page, timeoutMs: number): Promise<SubmitOutcome> {

@@ -469,6 +469,42 @@ describe('ashbyFiller', () => {
     await page.close();
   }, 60_000);
 
+  it('flags required Ashby entries with no value, including an unnamed combobox and a radio group without required attributes', async () => {
+    const page = await open('ashby-entry-prefix.html');
+    const r = await ashbyFiller.fill(page, P([e('identity:email', 'jane@example.com')]));
+    expect(r.requiredEmpty).toEqual(expect.arrayContaining(['Location', 'How did you hear about Acme?']));
+    expect(r.requiredEmpty).not.toContain('Email');
+    expect(r.requiredEmpty).not.toContain('If other, please specify below');
+    await page.close();
+  }, 60_000);
+
+  it('fills a custom country-type location combobox with the profile country (exact option, read back)', async () => {
+    posted.length = 0;
+    const page = await open('ashby-entry-prefix.html');
+    const radio = 'eefc2703-90f3-4810-a1ce-5f6c7f90fe6c_9ea8b1bb-a272-4352-9e26-50b387d8c025';
+    const p = P([e('identity:email', 'jane@example.com'), e('identity:country', 'Mexico'), e('identity:location', 'Guadalajara, Mexico'), e(radio, 'Job board', 'select', false, 'draft')]);
+    const r = await ashbyFiller.fill(page, p);
+    expect(r.filled).toEqual(expect.arrayContaining(['identity:country', radio]));
+    expect(r.notFound).toEqual(['identity:location']); // the one place field belongs to identity:country
+    expect(r.failed).toEqual([]);
+    expect(await page.inputValue('[data-field-path="6f1b584f-ba7d-47eb-a987-ae7e13a9c5d3"] input[role=combobox]')).toBe('Mexico');
+    expect(r.requiredEmpty).toEqual([]);
+    expect(allSorted(r)).toEqual(p.entries.map((x) => x.fieldId).sort());
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it('leaves the country combobox failed (and required-empty) when no option matches exactly', async () => {
+    posted.length = 0;
+    const page = await open('ashby-entry-prefix.html');
+    const r = await ashbyFiller.fill(page, P([e('identity:country', 'Peru'), e('identity:location', 'Lima, Peru')]));
+    expect(r.failed).toEqual(['identity:country']);
+    expect(await page.inputValue('[data-field-path="6f1b584f-ba7d-47eb-a987-ae7e13a9c5d3"] input[role=combobox]')).toBe('');
+    expect(r.requiredEmpty).toContain('Location');
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 60_000);
+
   it('reports a missing planned field and unanswered required yes/no', async () => {
     const page = await open('ashby-form.html');
     const r = await ashbyFiller.fill(page, P([e('identity:email', 'jane@example.com'), e('zz99', 'x', 'text', true, 'draft')]));

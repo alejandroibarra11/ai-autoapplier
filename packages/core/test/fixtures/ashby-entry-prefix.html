@@ -8,6 +8,8 @@
 -->
 <div class="ashby-application-form-container">
   <div class="_fieldEntry ashby-application-form-field-entry" data-field-path="_systemfield_email"><label class="ashby-application-form-question-title" for="_systemfield_email">Email</label><input name="_systemfield_email" id="_systemfield_email" type="email"></div>
+  <!-- custom required "Location" question: an unnamed autocomplete combobox with no required/aria-required attribute (live markup) -->
+  <div class="_fieldEntry_1e3gg_28 ashby-application-form-field-entry" data-field-path="6f1b584f-ba7d-47eb-a987-ae7e13a9c5d3" data-field-entry-id="__P___6f1b584f-ba7d-47eb-a987-ae7e13a9c5d3"><label class="_heading_f7cvd_52 _required_f7cvd_91 _label_1e3gg_42 ashby-application-form-question-title" for="6f1b584f-ba7d-47eb-a987-ae7e13a9c5d3">Location</label><div class="_description_1e3gg_48 ashby-application-form-question-description"><p>Country you're currently residing in</p></div><div class="_inputContainer_d7ago_28"><input class="_input_d7ago_28 ashby-application-form-input-autocomplete" placeholder="Start typing..." aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" role="combobox" value="" data-options="Mexico City, Mexico|Mexico|New Mexico, United States|Peru Township, United States"><button class="_toggleButton_d7ago_32" type="button"></button></div></div>
   <div data-field-path="9ea8b1bb-a272-4352-9e26-50b387d8c025" data-field-entry-id="__P___9ea8b1bb-a272-4352-9e26-50b387d8c025"><fieldset class="_container_1258i_28 _fieldEntry_1e3gg_28 ashby-application-form-input-radio-group"><label class="_heading_f7cvd_52 _required_f7cvd_91 ashby-application-form-question-title" for="9ea8b1bb-a272-4352-9e26-50b387d8c025">How did you hear about Acme?&nbsp;</label>
     <div class="ashby-application-form-input-radio-group-option"><span data-disabled="false"><span class="_circle_132c8_77"></span><input type="radio" id="__P___9ea8b1bb-a272-4352-9e26-50b387d8c025-labeled-radio-0" name="__P___9ea8b1bb-a272-4352-9e26-50b387d8c025" class="ashby-application-form-input-radio-group-option-radio" style="opacity:0;position:absolute"></span><label for="__P___9ea8b1bb-a272-4352-9e26-50b387d8c025-labeled-radio-0" class="ashby-application-form-input-radio-group-option-label">I'm a user</label></div>
     <div class="ashby-application-form-input-radio-group-option"><span data-disabled="false"><span class="_circle_132c8_77"></span><input type="radio" id="__P___9ea8b1bb-a272-4352-9e26-50b387d8c025-labeled-radio-1" name="__P___9ea8b1bb-a272-4352-9e26-50b387d8c025" class="ashby-application-form-input-radio-group-option-radio" style="opacity:0;position:absolute"></span><label for="__P___9ea8b1bb-a272-4352-9e26-50b387d8c025-labeled-radio-1" class="ashby-application-form-input-radio-group-option-label">Job board </label></div>
@@ -30,6 +32,18 @@
     for (const a of ['name', 'id', 'for', 'data-field-entry-id']) if (el.getAttribute(a)?.includes('__P__')) el.setAttribute(a, el.getAttribute(a).replace('__P__', p));
   });
   const send = (op) => fetch('/api/non-user-graphql?op=' + op, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ operationName: op, variables: {} }) });
+  const close = () => document.querySelectorAll('[role=listbox]').forEach((l) => l.remove());
+  const loc = document.querySelector('[role=combobox]');
+  loc.addEventListener('input', () => {
+    close();
+    const box = document.createElement('div'); box.setAttribute('role', 'listbox');
+    for (const o of loc.dataset.options.split('|').filter((o) => loc.value && o.toLowerCase().includes(loc.value.toLowerCase()))) {
+      const d = document.createElement('div'); d.setAttribute('role', 'option'); d.textContent = o;
+      d.addEventListener('mousedown', (ev) => { ev.preventDefault(); loc.value = o; close(); });
+      box.appendChild(d);
+    }
+    loc.parentElement.appendChild(box);
+  });
   document.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && ev.target.tagName === 'INPUT') send('ApiSubmitSingleApplicationFormAction'); });
 })();
 </script>
