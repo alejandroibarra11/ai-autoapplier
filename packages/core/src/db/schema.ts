@@ -42,6 +42,8 @@ export const jobs = sqliteTable('jobs', {
   resolvedKind: text('resolved_kind').$type<ResolvedKind>(),
   draftAttempts: integer('draft_attempts').notNull().default(0),
   draftFailureNotifiedAt: integer('draft_failure_notified_at', { mode: 'timestamp' }),
+  /** When the one-time company-board re-resolve ran for this manual/other job (null: not tried yet). */
+  boardLookupAt: integer('board_lookup_at', { mode: 'timestamp' }),
 }, (t) => [
   uniqueIndex('jobs_source_job').on(t.source, t.sourceJobId),
   index('jobs_dedupe_key').on(t.dedupeKey),

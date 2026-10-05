@@ -1,0 +1,1 @@
+ALTER TABLE `jobs` ADD `board_lookup_at` integer;
