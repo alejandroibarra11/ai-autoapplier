@@ -40,11 +40,12 @@ function profileProse(p: Profile): string {
   return [p.headline, p.summary, ...p.experience.flatMap((e) => e.highlights), ...p.projects.flatMap((pr) => [pr.name, pr.summary])].join('\n');
 }
 
-/** True when the term is a profile skill/stack entry or appears as a whole word in the profile prose. */
+/** True when the term is (a whole-word part of) a profile skill/stack entry, or appears as a whole word in the profile prose. */
 export function profileSupports(profile: Profile, term: string): boolean {
   const t = term.trim().toLowerCase();
   if (!t) return true;
-  if (profileVocabulary(profile).includes(t)) return true;
+  const vocab = profileVocabulary(profile);
+  if (vocab.includes(t) || vocab.some((v) => termRegex(t).test(v))) return true; // "Google Cloud" ⊂ "Google Cloud Platform"
   return termRegex(t).test(profileProse(profile));
 }
 

@@ -129,6 +129,12 @@ describe('profileSupports', () => {
     expect(profileSupports(prose, 'HTML')).toBe(true);
     expect(profileSupports(prose, 'React')).toBe(true);
   });
+  it('accepts a term that is a whole-word part of a vocabulary entry', () => {
+    const p = { ...prose, skills: { cloud: ['Google Cloud Platform'] } };
+    expect(profileSupports(p, 'Google Cloud')).toBe(true);
+    expect(profileSupports(p, 'Google Clo')).toBe(false);
+    expect(profileSupports(p, 'AWS')).toBe(false);
+  });
 });
 
 describe('draftJob extra checks', () => {
