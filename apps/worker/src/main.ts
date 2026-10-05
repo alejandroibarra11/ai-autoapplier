@@ -120,6 +120,8 @@ const draftLoop = createDraftLoop({
       if (browserUp) {
         const f = await runFill({
           db: app.db, cfg: app.cfg, provider: draftProvider, profile: app.profile, answers: app.answers, shotsDir, pages,
+          // Real form questions for drafts made against the generic set (job re-resolved to an ATS after drafting).
+          questions: async (t) => extractQuestions(t, makePageOpener(await holder.get(), app.cfg.browser.timeoutMs)),
         });
         if (f.filled || f.manual) console.log(`[fill] filled=${f.filled} manual=${f.manual}`);
       }

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildFillPlan, isDemographic, pickDecline } from '../src/submit/plan';
+import { buildFillPlan, carryOverAnswers, isDemographic, isGenericQuestionSet, pickDecline } from '../src/submit/plan';
+import { COMMON_QUESTIONS } from '../src/apply/common';
 import { fillSummary, verifyFill } from '../src/submit/verify';
 import { parseAnswers } from '../src/answers';
 import { loadProfile } from '../src/profile';
@@ -109,5 +110,34 @@ describe('fillSummary', () => {
 
   it('falls back to plan counts for rows without a report', () => {
     expect(fillSummary(plan, null)).toEqual({ filled: 4, notOnForm: [], cvAttached: true });
+  });
+});
+
+describe('generic question set detection + carry-over', () => {
+  it('isGenericQuestionSet: true only for (a subset of) the manual common set', () => {
+    expect(isGenericQuestionSet(COMMON_QUESTIONS)).toBe(true);
+    expect(isGenericQuestionSet(COMMON_QUESTIONS.slice(0, 3))).toBe(true);
+    expect(isGenericQuestionSet(qs)).toBe(false);
+    expect(isGenericQuestionSet([...COMMON_QUESTIONS, { id: 'q_x', label: 'X', type: 'text', required: false }])).toBe(false);
+    expect(isGenericQuestionSet([])).toBe(false);
+  });
+  it('carryOverAnswers: by real id first, else by normalized label; re-keyed to the real question', () => {
+    const real: FormQuestion[] = [
+      { id: 'q1', label: 'LinkedIn Profile *', type: 'text', required: true },
+      { id: 'q2', label: 'Why do you want to work at this company', type: 'textarea', required: false },
+      { id: 'q3', label: 'Do you have work authorization to work in that country?', type: 'select', required: true, options: ['Yes', 'No'] },
+      { id: 'q4', label: 'Anything else?', type: 'text', required: false },
+    ];
+    const out = carryOverAnswers(real, [
+      { questionId: 'linkedin', label: 'LinkedIn profile', answer: 'https://li', source: 'answers' },
+      { questionId: 'why_company', label: 'Why do you want to work at this company?', answer: 'Mission', source: 'generated' },
+      { questionId: 'work_auth', label: 'Are you legally authorized to work in the United States?', answer: 'No', source: 'answers' },
+      { questionId: 'q4', label: 'Anything else?', answer: 'Kept', source: 'generated', fillTime: true },
+    ]);
+    expect(out).toEqual([
+      { questionId: 'q1', label: 'LinkedIn Profile *', answer: 'https://li', source: 'answers' },
+      { questionId: 'q2', label: 'Why do you want to work at this company', answer: 'Mission', source: 'generated' },
+      { questionId: 'q4', label: 'Anything else?', answer: 'Kept', source: 'generated', fillTime: true },
+    ]);
   });
 });
