@@ -97,7 +97,7 @@ if (cmd === 'once') {
 } else if (cmd === 'fill') {
   // Fills the form for one ready_to_apply job and stops: never submits (there is no `cli submit`).
   const id = Number(process.argv[3]);
-  const { getJob, runFill, openBrowser, latestSubmission } = await import('@autoapplier/core');
+  const { getJob, runFill, openBrowser, latestSubmission, extractQuestions, makePageOpener } = await import('@autoapplier/core');
   const { join } = await import('node:path');
   const { AUTO_FILL_KINDS } = await import('./submissions');
   const job = Number.isInteger(id) ? getJob(app.db, id) : null;
@@ -110,6 +110,7 @@ if (cmd === 'once') {
       const r = await runFill({
         db: app.db, cfg: app.cfg, provider: createProvider(app.cfg.drafting.provider), profile: app.profile, answers: app.answers,
         shotsDir: join(app.root, 'data/screenshots'), pages: { newPage: () => session.context.newPage() }, onlyJobId: id, skipStaleSweep: true,
+        questions: (t) => extractQuestions(t, makePageOpener(session, app.cfg.browser.timeoutMs)),
       });
       console.log(r);
       const sub = latestSubmission(app.db, id);

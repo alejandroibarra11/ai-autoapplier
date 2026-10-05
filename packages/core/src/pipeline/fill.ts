@@ -4,7 +4,7 @@ import type { Db } from '../db/client';
 import type { Config } from '../config';
 import type { Profile } from '../profile';
 import type { Answers } from '../answers';
-import type { ApplyTarget, DraftAnswer } from '../apply/types';
+import type { ApplyTarget, DraftAnswer, FormQuestion } from '../apply/types';
 import { targetFromUrl } from '../apply/resolve';
 import {
   type JobRow, appendDraftAnswers, claimStatus, getJob, insertSubmission, latestDraft, latestSubmission, listJobsForFilling, listStaleByStatus, recordUsage, setStatus,
@@ -12,7 +12,7 @@ import {
 } from '../db/repo';
 import { costUsd, type LLMProvider } from '../llm/provider';
 import { answerMissing, isBlockingFlag } from '../draft/draft';
-import { buildFillPlan } from '../submit/plan';
+import { buildFillPlan, carryOverAnswers, isDemographic, isGenericQuestionSet } from '../submit/plan';
 import { verifyFill } from '../submit/verify';
 import { detectCaptchaChallenge, detectLoginWall } from '../submit/detect';
 import { takeShot } from '../submit/screenshot';
@@ -27,6 +27,13 @@ export interface FillDeps {
   pages: PageFactory; now?: Date; limit?: number; onlyJobId?: number;
   /** Timeout for the fill-time LLM step (default FILL_LLM_TIMEOUT_MS), separate from submit.fillTimeoutMs. */
   llmTimeoutMs?: number;
+  /**
+   * Reads the real form questions for a target (extractQuestions). Used only when the draft's questions are the generic
+   * manual set (the job was re-resolved to a real ATS after drafting); without it such a job goes to needs_manual.
+   */
+  questions?: (t: ApplyTarget) => Promise<FormQuestion[]>;
+  /** Timeout for that form-question read (default FILL_QUESTIONS_TIMEOUT_MS). */
+  questionsTimeoutMs?: number;
   /** Skip the stale filling/submitting sweep (the CLI: another process may own those jobs). Default false. */
   skipStaleSweep?: boolean;
   /** Test seam: runs after a job is picked and before it is claimed. */
@@ -88,6 +95,7 @@ type Outcome =
 type Prepared = { kind: 'ready'; plan: FillPlan; target: ApplyTarget } | Extract<Outcome, { kind: 'manual' }>;
 
 export const FILL_LLM_TIMEOUT_MS = 90_000;
+export const FILL_QUESTIONS_TIMEOUT_MS = 60_000;
 export const SPEND_CAP_REASON = 'daily AI spend cap reached';
 
 /** Draft + fill LLM spend since the start of the UTC day of `now`. */
@@ -98,9 +106,30 @@ function draftingSpendToday(db: Db, now: Date): number {
 }
 
 /**
+ * The questions to fill and the draft answers keyed to them. A draft made against the generic manual question set
+ * (job re-resolved to Greenhouse/Lever/Ashby after drafting) is mapped onto the real form: answers whose label matches
+ * a real question carry over, the rest are left for the fill-time answers. Returns a reason string when the real form
+ * cannot be read: the generic questions are never planned.
+ */
+async function formQuestions(d: FillDeps, target: ApplyTarget, draft: { questions: FormQuestion[]; answers: DraftAnswer[] }):
+  Promise<{ questions: FormQuestion[]; answers: DraftAnswer[]; remapped: boolean } | string> {
+  if (!isGenericQuestionSet(draft.questions)) return { questions: draft.questions, answers: draft.answers, remapped: false };
+  const why = `draft has only generic questions; could not read the ${target.kind} form questions`;
+  if (!d.questions) return why;
+  let real: FormQuestion[];
+  try { real = await withTimeout(d.questions(target), d.questionsTimeoutMs ?? FILL_QUESTIONS_TIMEOUT_MS, 'form questions'); }
+  catch (e) { return `${why} (${errMsg(e)})`; }
+  // extractQuestions falls back to the generic set when the form can't be read.
+  if (!real.length || isGenericQuestionSet(real)) return why;
+  return { questions: real, answers: carryOverAnswers(real, draft.answers), remapped: true };
+}
+
+/**
  * Builds the plan. Required questions the draft lacks are answered by the LLM (answers only, own timeout, before any
  * page is opened, subject to the daily drafting spend cap) and saved into the draft marked `fillTime`, so a re-fill
- * reuses them. Writes nothing to the job/submission tables.
+ * reuses them. For a draft remapped from the generic set, optional real questions without a carried-over answer are
+ * answered the same way (the draft would have answered every question had it seen the real form). Writes nothing to
+ * the job/submission tables.
  */
 async function prepareFill(d: FillDeps, job: JobRow, now: Date, ctx: FillCtx): Promise<Prepared> {
   const manual = (reasons: string[]): Prepared => ({ kind: 'manual', plan: ctx.plan, reasons, shot: null });
@@ -109,20 +138,30 @@ async function prepareFill(d: FillDeps, job: JobRow, now: Date, ctx: FillCtx): P
   const draft = latestDraft(d.db, job.id);
   if (!draft) return manual(['no draft']);
 
-  const input = { questions: draft.questions, answers: d.answers, profile: d.profile };
-  let plan = buildFillPlan({ ...input, draft });
+  const form = await formQuestions(d, target, draft);
+  if (typeof form === 'string') {
+    ctx.plan = buildFillPlan({ questions: [], answers: d.answers, profile: d.profile, draft });
+    return manual([form]);
+  }
+  const { questions } = form;
+  const input = { questions, answers: d.answers, profile: d.profile };
+  let plan = buildFillPlan({ ...input, draft: { ...draft, answers: form.answers } });
   ctx.plan = plan;
-  if (plan.missingRequired.length) {
+  const answered = new Set(form.answers.map((a) => a.questionId));
+  const ids = new Set([
+    ...plan.missingRequired.map((m) => m.fieldId),
+    ...(form.remapped ? questions.filter((q) => q.type !== 'identity' && q.type !== 'file' && !isDemographic(q.label) && !answered.has(q.id)).map((q) => q.id) : []),
+  ]);
+  if (ids.size) {
     if (draftingSpendToday(d.db, now) >= d.cfg.drafting.dailySpendCapUsd) return manual([SPEND_CAP_REASON]);
-    const ids = new Set(plan.missingRequired.map((m) => m.fieldId));
     const llmMs = d.llmTimeoutMs ?? FILL_LLM_TIMEOUT_MS;
     const res = await withTimeout(answerMissing({
       provider: d.provider, model: d.cfg.drafting.model, effort: d.cfg.drafting.effort,
-      profile: d.profile, answers: d.answers, job, questions: draft.questions.filter((q) => ids.has(q.id)),
+      profile: d.profile, answers: d.answers, job, questions: questions.filter((q) => ids.has(q.id)),
       onUsage: (u) => recordUsage(d.db, { jobId: job.id, stage: 'fill', ...u, costUsd: costUsd(d.cfg.pricing, u) }, now),
     }), llmMs, 'fill-time answers');
     const extra: DraftAnswer[] = res.answers.filter((a) => ids.has(a.questionId)).map((a) => ({ ...a, source: 'generated', fillTime: true }));
-    const withExtra = [...draft.answers.filter((a) => !ids.has(a.questionId)), ...extra];
+    const withExtra = [...form.answers.filter((a) => !ids.has(a.questionId)), ...extra];
     plan = buildFillPlan({ ...input, draft: { ...draft, answers: withExtra } });
     ctx.plan = plan;
     const blocking = res.flags.filter(isBlockingFlag);

@@ -3,13 +3,14 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  openDb, insertJobs, listJobsByStatus, setStatus, insertDraft, getJob, setResolved, insertSubmission, latestSubmission, updateSubmission,
+  openDb, insertJobs, listJobsByStatus, listEvents, setStatus, insertDraft, getJob, setResolved, insertSubmission, latestSubmission, updateSubmission,
   STALE_SUBMIT_NOTE, type FillEntry, type FillPlan, type ResolvedKind,
 } from '@autoapplier/core';
 import { handleDraftAction } from '../src/drafts';
 import { escapeHtml } from '../src/telegram';
 import {
-  createSubmitTaps, formatFillCard, handleCancel, notifySubmissions, parseSubmitCallback, photoFits, reportSubmitResult,
+  ASHBY_AUTOSAVE_NOTE, createSubmitTaps, formatFillCard, handleCancel, handleRetryFill, notifySubmissions, parseRetryCallback, parseSubmitCallback, photoFits,
+  reportSubmitResult,
   sendReadyAfterCancel, sendReadyUnlessAutoFill, submitAndReport, type SubmissionSender,
 } from '../src/submissions';
 
@@ -488,5 +489,80 @@ describe('escaped lengths stay within Telegram limits', () => {
     }
     expect(all.length).toBeGreaterThan(5);
     check();
+  });
+});
+
+describe('🔁 Retry auto-fill on "Finish manually"', () => {
+  it('blocked fill of a greenhouse/lever/ashby job: the Finish manually message carries rf:<id>', async () => {
+    for (const kind of ['greenhouse', 'lever', 'ashby'] as const) {
+      const { db, id } = setup({ kind, status: 'needs_manual', result: 'blocked', evidence: 'field not found: X' });
+      const { calls, sender } = recorder();
+      expect(await notifySubmissions(sender, '42', db, cfg(true), { delay: async () => {} })).toBe(1);
+      expect(calls[0]!.text).toContain('⚠️ Finish manually');
+      expect(kb(calls[0]!)).toContain(`"rf:${id}"`);
+      expect(kb(calls[0]!)).toContain('🔁 Retry auto-fill');
+    }
+  });
+  it('no retry button for other kinds, or for submit_failed (the click may have happened)', async () => {
+    for (const kind of ['manual', 'other'] as const) {
+      const { db } = setup({ kind, status: 'needs_manual', result: 'blocked', evidence: 'x' });
+      const { calls, sender } = recorder();
+      await notifySubmissions(sender, '42', db, cfg(true), { delay: async () => {} });
+      expect(calls.some((c) => kb(c).includes('rf:'))).toBe(false);
+    }
+    const { db } = setup({ status: 'submit_failed', result: 'failed', evidence: 'unknown: no confirmation' });
+    const { calls, sender } = recorder();
+    await notifySubmissions(sender, '42', db, cfg(true), { delay: async () => {} });
+    expect(calls.some((c) => kb(c).includes('rf:'))).toBe(false);
+  });
+  it('a needs_manual submit result also offers the retry; submit_failed does not', async () => {
+    const m = setup({ status: 'needs_manual', result: 'blocked' });
+    const r1 = recorder();
+    await reportSubmitResult(r1.sender, '42', m.db, cfg(true), m.id, { status: 'needs_manual', reason: 'form changed', shot: png(800, 1600) });
+    expect(kb(r1.calls[0]!)).toContain(`"rf:${m.id}"`);
+    const f = setup({ status: 'submit_failed', result: 'failed' });
+    const r2 = recorder();
+    await reportSubmitResult(r2.sender, '42', f.db, cfg(true), f.id, { status: 'submit_failed', reason: 'unknown', shot: png(800, 1600) });
+    expect(r2.calls.some((c) => kb(c).includes('rf:'))).toBe(false);
+  });
+  it('parseRetryCallback', () => {
+    expect(parseRetryCallback('rf:12')).toBe(12);
+    expect(parseRetryCallback('rf:x')).toBeNull();
+    expect(parseRetryCallback('ma:12')).toBeNull();
+  });
+  it('handleRetryFill: chat-gated, needs_manual → ready_to_apply with a job_events note, press-once', () => {
+    const { db, id } = setup({ status: 'needs_manual', result: 'blocked' });
+    expect(handleRetryFill(db, '42', 7, id)).toEqual({ ok: false, text: 'Not allowed' });
+    expect(handleRetryFill(db, '', undefined, id)).toEqual({ ok: false, text: 'Not allowed' });
+    expect(getJob(db, id)!.status).toBe('needs_manual');
+    const r = handleRetryFill(db, '42', 42, id);
+    expect(r.ok).toBe(true);
+    expect(r.text).toContain('🔁');
+    expect(r.text).not.toContain('Ashby');
+    expect(getJob(db, id)!.status).toBe('ready_to_apply');
+    const ev = listEvents(db, id).at(-1)!;
+    expect(ev).toMatchObject({ fromStatus: 'needs_manual', toStatus: 'ready_to_apply' });
+    expect(ev.note).toMatch(/retry auto-fill/i);
+    expect(handleRetryFill(db, '42', 42, id)).toEqual({ ok: false, text: 'Already ready_to_apply' });
+    expect(handleRetryFill(db, '42', 42, 9999)).toEqual({ ok: false, text: 'Job not found' });
+  });
+  it('handleRetryFill refuses other statuses and non-auto-fill kinds', () => {
+    for (const status of ['awaiting_submit', 'submit_failed', 'applied', 'ready_to_apply'] as const) {
+      const { db, id } = setup({ status, result: status === 'submit_failed' ? 'failed' : 'filled' });
+      expect(handleRetryFill(db, '42', 42, id)).toEqual({ ok: false, text: `Already ${status}` });
+      expect(getJob(db, id)!.status).toBe(status);
+    }
+    for (const kind of ['manual', 'other'] as const) {
+      const { db, id } = setup({ kind, status: 'needs_manual', result: 'blocked' });
+      expect(handleRetryFill(db, '42', 42, id).ok).toBe(false);
+      expect(getJob(db, id)!.status).toBe('needs_manual');
+    }
+  });
+  it('ashby: the reply reminds that Ashby saves typed values on the employer side', () => {
+    const { db, id } = setup({ kind: 'ashby', status: 'needs_manual', result: 'blocked' });
+    const r = handleRetryFill(db, '42', 42, id);
+    expect(r.ok).toBe(true);
+    expect(r.text).toContain(ASHBY_AUTOSAVE_NOTE);
+    expect(r.text.length).toBeLessThanOrEqual(200); // Telegram answerCallbackQuery text limit
   });
 });

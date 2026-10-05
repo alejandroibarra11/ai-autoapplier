@@ -1,6 +1,6 @@
 import { Bot, GrammyError, InlineKeyboard } from 'grammy';
 import { confirmOverrideKeyboard, draftKeyboard, handleDraftAction, resendDraftCards } from './drafts';
-import { handleCancel, markAppliedKeyboard, parseSubmitCallback, type SubmitTapResult } from './submissions';
+import { handleCancel, handleRetryFill, markAppliedKeyboard, parseRetryCallback, parseSubmitCallback, type SubmitTapResult } from './submissions';
 import {
   formatComp, getJob, latestScore, listUnnotified, markNotified, setStatus,
   type Db, type JobRow, type ScorePayload,
@@ -151,6 +151,18 @@ export function createBot(token: string, chatId: string, db: Db, onReady?: (jobI
       await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() }).catch(() => {});
       // No start = the card's dry-run mode is stale: the job went back to ready_to_apply and the fill loop re-fills it.
       if (r.start) void r.start();
+      return;
+    }
+    // 🔁 Retry auto-fill (needs_manual → ready_to_apply): drop the button on success (press-once); the fill loop re-fills.
+    const retryId = parseRetryCallback(data);
+    if (retryId !== null) {
+      const r = handleRetryFill(db, chatId, ctx.chat?.id, retryId);
+      await ctx.answerCallbackQuery({ text: r.text, ...(r.ok && r.text.includes('\n') ? { show_alert: true } : {}) }).catch(() => {});
+      if (r.ok) {
+        const markup = ctx.callbackQuery.message?.reply_markup;
+        const rest = (markup?.inline_keyboard ?? []).map((row) => row.filter((b) => !('callback_data' in b && b.callback_data === data))).filter((row) => row.length);
+        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: rest } }).catch(() => {});
+      }
       return;
     }
     // ⚠️ Approve anyway: swap in the confirm step (nothing changes until ✅ Yes); ↩ Back restores the card's buttons.

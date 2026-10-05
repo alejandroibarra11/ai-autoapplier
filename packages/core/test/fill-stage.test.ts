@@ -4,6 +4,8 @@ import { chromium, type Browser } from 'playwright';
 import { runFill, resetStaleFillSubmit, type FillDeps } from '../src/pipeline/fill';
 import { claimStatus, getJob, insertSubmission, latestDraft, latestSubmission, listEvents, recordUsage, setStatus, updateSubmission } from '../src/db/repo';
 import type { LLMProvider } from '../src/llm/provider';
+import type { ApplyTarget, DraftAnswer, FormQuestion } from '../src/apply/types';
+import { COMMON_QUESTIONS } from '../src/apply/common';
 import {
   answers, baseCfg, fakePages, fixture, FakeProvider, GH_ANSWERS, GH_QUESTIONS, llmOut, profile, readyJob,
 } from './fill-helpers';
@@ -254,4 +256,103 @@ describe('runFill', () => {
     expect(getJob(r.db, r.jobId)!.status).toBe('skipped');
     expect(latestSubmission(r.db, r.jobId)).toBeUndefined();
   }, 30_000);
+});
+
+describe('runFill: draft made against the generic manual question set (job re-resolved to a real ATS)', () => {
+  const GENERIC_ANSWERS: DraftAnswer[] = [
+    { questionId: 'why_company', label: 'Why do you want to work at this company?', answer: 'Great mission', source: 'generated' },
+    { questionId: 'work_auth', label: 'Are you legally authorized to work in the United States?', answer: 'No', source: 'answers' },
+    { questionId: 'linkedin', label: 'LinkedIn profile', answer: 'https://linkedin.com/in/carried', source: 'answers' },
+    { questionId: 'github', label: 'GitHub profile', answer: 'https://github.com/x', source: 'answers' },
+  ];
+  const GENERIC_IDS = COMMON_QUESTIONS.map((q) => q.id);
+  const genericJob = () => readyJob({ now, questions: COMMON_QUESTIONS, answers: GENERIC_ANSWERS });
+  const extractor = (qs: FormQuestion[]) => {
+    const calls: ApplyTarget[] = [];
+    return { calls, questions: async (t: ApplyTarget) => { calls.push(t); return qs; } };
+  };
+
+  it('extracts the real form, carries over label-matching answers, generates the rest at fill time, no generic entries', async () => {
+    const r = genericJob();
+    const ex = extractor(GH_QUESTIONS);
+    const llm = new FakeProvider(llmOut([{ questionId: 'question_2', answer: 'No' }, { questionId: 'question_3', answer: 'I like the product' }]));
+    const res = await runFill(deps(r, { provider: llm, questions: ex.questions }));
+    expect(res).toEqual({ filled: 1, manual: 0 });
+    expect(ex.calls).toHaveLength(1);
+    expect(ex.calls[0]).toMatchObject({ kind: 'greenhouse', atsToken: 'acme', atsJobId: String(r.jobId) });
+    expect(llm.calls).toBe(1);
+    const sub = latestSubmission(r.db, r.jobId)!;
+    expect(sub.result).toBe('filled');
+    const ids = sub.plan.entries.map((e) => e.fieldId);
+    expect(ids.filter((id) => GENERIC_IDS.includes(id))).toEqual([]);
+    expect(sub.plan.entries.find((e) => e.fieldId === 'question_1')).toMatchObject({ value: 'https://linkedin.com/in/carried', source: 'answers' });
+    expect(sub.plan.entries.find((e) => e.fieldId === 'question_3')).toMatchObject({ value: 'I like the product', source: 'fill_time', required: true });
+    expect(sub.plan.entries.find((e) => e.fieldId === 'question_2')).toBeDefined();
+    expect(sub.plan.entries.find((e) => e.fieldId === 'identity:coverLetter')!.value).toBe('Dear team');
+    // Generated answers are persisted (fillTime); the draft's questions / cover letter are untouched.
+    const draft = latestDraft(r.db, r.jobId)!;
+    expect(draft.answers.find((a) => a.questionId === 'question_3')).toMatchObject({ answer: 'I like the product', fillTime: true, source: 'generated' });
+    expect(draft.questions).toEqual(COMMON_QUESTIONS);
+    expect(draft.coverLetter).toBe('Dear team');
+    expect(r.db.$client.prepare("select count(*) n from llm_usage where stage = 'fill'").get()).toEqual({ n: 1 });
+    // Re-fill (e.g. mode change): extracts again, reuses the persisted fill-time answers, no LLM.
+    expect(claimStatus(r.db, r.jobId, 'awaiting_submit', 'ready_to_apply', 'mode changed: re-fill', now)).toBe(true);
+    expect(await runFill(deps(r, { provider: noLlm, questions: ex.questions }))).toEqual({ filled: 1, manual: 0 });
+    const again = latestSubmission(r.db, r.jobId)!;
+    expect(again.plan.entries.find((e) => e.fieldId === 'question_3')).toMatchObject({ value: 'I like the product', source: 'fill_time' });
+    expect(again.plan.entries.map((e) => e.fieldId).filter((id) => GENERIC_IDS.includes(id))).toEqual([]);
+  }, 90_000);
+
+  it('when the real form cannot be read (extractor falls back to the generic set) → needs_manual, no LLM, no page, no generic entries', async () => {
+    const r = genericJob();
+    const pages = fakePages(browser, state);
+    const res = await runFill(deps(r, { pages, questions: extractor(COMMON_QUESTIONS).questions }));
+    expect(res).toEqual({ filled: 0, manual: 1 });
+    expect(pages.opened).toEqual([]);
+    expect(getJob(r.db, r.jobId)!.status).toBe('needs_manual');
+    const sub = latestSubmission(r.db, r.jobId)!;
+    expect(sub.evidence).toMatch(/could not read the greenhouse form questions/);
+    expect(sub.plan.entries.map((e) => e.fieldId).filter((id) => GENERIC_IDS.includes(id))).toEqual([]);
+  }, 30_000);
+
+  it('an extractor error, or no extractor at all → needs_manual without generic entries', async () => {
+    for (const questions of [async () => { throw new Error('boom'); }, undefined]) {
+      const r = genericJob();
+      const pages = fakePages(browser, state);
+      expect(await runFill(deps(r, { pages, ...(questions ? { questions } : {}) }))).toEqual({ filled: 0, manual: 1 });
+      expect(pages.opened).toEqual([]);
+      const sub = latestSubmission(r.db, r.jobId)!;
+      expect(sub.plan.entries.map((e) => e.fieldId).filter((id) => GENERIC_IDS.includes(id))).toEqual([]);
+    }
+  }, 30_000);
+
+  it('the daily spend cap still applies to the answers for the real form', async () => {
+    const r = genericJob();
+    recordUsage(r.db, { jobId: null, stage: 'draft', provider: 'anthropic', model: 'm', inputTokens: 1, outputTokens: 1, costUsd: baseCfg.drafting.dailySpendCapUsd }, min(10));
+    const llm = new FakeProvider(llmOut([]));
+    const res = await runFill(deps(r, { provider: llm, questions: extractor(GH_QUESTIONS).questions }));
+    expect(res).toEqual({ filled: 0, manual: 1 });
+    expect(llm.calls).toBe(0);
+    const sub = latestSubmission(r.db, r.jobId)!;
+    expect(sub.evidence).toBe('daily AI spend cap reached');
+    expect(sub.plan.entries.map((e) => e.fieldId).filter((id) => GENERIC_IDS.includes(id))).toEqual([]);
+  }, 30_000);
+
+  it('optional real questions the generic draft never saw are answered too (the draft answers every question)', async () => {
+    const r = genericJob();
+    const optional: FormQuestion = { id: 'question_4', label: 'Native pick', type: 'select', required: false, options: ['Yes', 'Maybe'] };
+    const llm = new FakeProvider(llmOut([
+      { questionId: 'question_2', answer: 'No' }, { questionId: 'question_3', answer: 'I like the product' }, { questionId: 'question_4', answer: 'Maybe' },
+    ]));
+    const res = await runFill(deps(r, { provider: llm, questions: extractor([...GH_QUESTIONS, optional]).questions }));
+    expect(res).toEqual({ filled: 1, manual: 0 });
+    expect(llm.calls).toBe(1);
+    expect(latestSubmission(r.db, r.jobId)!.plan.entries.find((e) => e.fieldId === 'question_4')).toMatchObject({ value: 'Maybe', source: 'fill_time', required: false });
+  }, 90_000);
+
+  it('a draft built from the real form does not trigger a re-extraction', async () => {
+    const r = readyJob({ now });
+    const res = await runFill(deps(r, { questions: async () => { throw new Error('must not extract'); } }));
+    expect(res).toEqual({ filled: 1, manual: 0 });
+  }, 90_000);
 });

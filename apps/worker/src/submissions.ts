@@ -49,6 +49,23 @@ export function markAppliedKeyboard(jobId: number): InlineKeyboard {
   return new InlineKeyboard().text('📨 Mark applied', `ma:${jobId}`).text('⏭ Skip', `sd:${jobId}`);
 }
 
+/** True when a needs_manual job can be sent back to the fill loop (🔁 Retry auto-fill). */
+const canRetryFill = (job: JobRow) => job.status === 'needs_manual' && AUTO_FILL_KINDS.includes(job.resolvedKind ?? '');
+
+/** Keyboard for a "finish manually" headline: 📨 Mark applied / ⏭ Skip when there is no draft, 🔁 Retry auto-fill when possible. */
+function manualKeyboard(job: JobRow, hasDraft: boolean): InlineKeyboard | undefined {
+  const retry = canRetryFill(job);
+  if (hasDraft && !retry) return undefined;
+  const kb = hasDraft ? new InlineKeyboard() : markAppliedKeyboard(job.id);
+  if (retry) (hasDraft ? kb : kb.row()).text('🔁 Retry auto-fill', `rf:${job.id}`);
+  return kb;
+}
+
+export function parseRetryCallback(data: string): number | null {
+  const m = /^rf:(\d+)$/.exec(data);
+  return m ? Number(m[1]) : null;
+}
+
 function fillCardParts(job: JobRow, sub: SubmissionRow, dryRun: boolean): { head: string[]; details: string[] } {
   const entries = sub.plan.entries;
   const sum = fillSummary(sub.plan, sub.report);
@@ -114,7 +131,7 @@ async function sendFillCard(sender: SubmissionSender, chatId: string, job: JobRo
 /** "Finish manually" with the screenshot, then the phase 2 copy-paste messages (with 📨 Mark applied). */
 async function sendManual(sender: SubmissionSender, chatId: string, db: Db, job: JobRow, headline: string, shot: string | null): Promise<void> {
   const draft = latestDraft(db, job.id);
-  await sendWithShot(sender, chatId, shot, headline, draft ? undefined : markAppliedKeyboard(job.id));
+  await sendWithShot(sender, chatId, shot, headline, manualKeyboard(job, !!draft));
   // The headline is what counts as delivered: a copy-paste failure must not re-send it next loop.
   if (draft) await sendReady(sender, chatId, job, draft).catch((e) => console.error(`[telegram] copy-paste messages failed for job #${job.id}:`, errMsg(e)));
 }
@@ -201,6 +218,25 @@ export function handleCancel(
   const sub = latestSubmission(db, jobId);
   if (sub) updateSubmission(db, sub.id, { result: 'cancelled', evidence: 'cancelled by user' });
   return { ok: true, text: '✋ Cancelled — nothing was sent' };
+}
+
+/**
+ * 🔁 Retry auto-fill: only from needs_manual (atomic) and only for Greenhouse/Lever/Ashby jobs, → ready_to_apply so the
+ * fill loop fills the form again (never submits). The reply text reminds that Ashby keeps typed values.
+ */
+export function handleRetryFill(
+  db: Db, allowedChatId: string, fromChatId: string | number | undefined, jobId: number, now = new Date(),
+): { ok: boolean; text: string } {
+  if (!allowed(allowedChatId, fromChatId)) return { ok: false, text: 'Not allowed' };
+  const job = getJob(db, jobId);
+  if (!job) return { ok: false, text: 'Job not found' };
+  if (job.status !== 'needs_manual') return { ok: false, text: `Already ${job.status}` };
+  if (!AUTO_FILL_KINDS.includes(job.resolvedKind ?? '')) return { ok: false, text: `Auto-fill does not support ${job.resolvedKind ?? 'this job'}` };
+  if (!claimStatus(db, jobId, 'needs_manual', 'ready_to_apply', 'retry auto-fill (telegram)', now)) {
+    return { ok: false, text: `Already ${getJob(db, jobId)?.status ?? job.status}` };
+  }
+  const text = '🔁 Retrying auto-fill — a new screenshot will follow';
+  return { ok: true, text: job.resolvedKind === 'ashby' ? `${text}\n${ASHBY_AUTOSAVE_NOTE}` : text };
 }
 
 /** After ✋ Cancel: the phase 2 copy-paste messages for the job (📨 Mark applied / ⏭ Skip), so it can be finished by hand. */
