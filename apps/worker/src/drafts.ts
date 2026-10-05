@@ -1,6 +1,6 @@
 import { InlineKeyboard } from 'grammy';
 import {
-  getJob, isBlockingFlag, latestDraft, listUnnotifiedDraftFailures, listUnnotifiedDrafts, markDraftFailureNotified, markDraftNotified, setStatus,
+  getJob, isBlockingFlag, latestDraft, listJobsByStatus, listUnnotifiedDraftFailures, listUnnotifiedDrafts, markDraftFailureNotified, markDraftNotified, setStatus,
   type Db, type DraftRow, type JobRow, type JobStatus,
 } from '@autoapplier/core';
 import { escapeHtml, type MessageSender } from './telegram';
@@ -32,8 +32,13 @@ export function formatDraftCard(job: JobRow, draft: DraftRow): string {
 
 export function draftKeyboard(jobId: number, blocked: boolean): InlineKeyboard {
   const kb = new InlineKeyboard();
-  if (!blocked) kb.text('✅ Approve', `ap:${jobId}`);
+  kb.text(blocked ? '⚠️ Approve anyway' : '✅ Approve', `${blocked ? 'aa' : 'ap'}:${jobId}`);
   return kb.text('⏭ Skip', `sd:${jobId}`);
+}
+
+/** After ⚠️ Approve anyway: a second tap confirms (ao:), ↩ restores the card's buttons (ab:). */
+export function confirmOverrideKeyboard(jobId: number): InlineKeyboard {
+  return new InlineKeyboard().text('✅ Yes, approve with warnings', `ao:${jobId}`).text('↩ Back', `ab:${jobId}`);
 }
 
 const ESC_BUDGET = 3500;
@@ -88,10 +93,12 @@ export function formatReadyMessages(job: JobRow, draft: DraftRow): string[] {
   return pack(blocks);
 }
 
-export function parseDraftCallback(data: string): { action: 'approve' | 'skip' | 'applied'; jobId: number } | null {
-  const m = /^(ap|sd|ma):(\d+)$/.exec(data);
+const DRAFT_ACTIONS = { ap: 'approve', ao: 'override', sd: 'skip', ma: 'applied' } as const;
+
+export function parseDraftCallback(data: string): { action: (typeof DRAFT_ACTIONS)[keyof typeof DRAFT_ACTIONS]; jobId: number } | null {
+  const m = /^(ap|ao|sd|ma):(\d+)$/.exec(data);
   if (!m) return null;
-  return { action: m[1] === 'ap' ? 'approve' : m[1] === 'sd' ? 'skip' : 'applied', jobId: Number(m[2]) };
+  return { action: DRAFT_ACTIONS[m[1] as keyof typeof DRAFT_ACTIONS], jobId: Number(m[2]) };
 }
 
 /** Mark applied: after the copy-paste flow, or after a fill/submit the user finished by hand. */
@@ -120,8 +127,9 @@ export function handleDraftAction(
   if (job.status !== 'draft_ready') return { ok: false, text: `Already ${job.status}` };
   const draft = latestDraft(db, job.id);
   if (!draft) return { ok: false, text: 'No draft' };
-  if (draft.flags.some(isBlockingFlag)) return { ok: false, text: '⚠️ Draft has warnings — review it in the dashboard' };
-  setStatus(db, job.id, 'ready_to_apply', 'telegram', {}, now);
+  const blocked = draft.flags.some(isBlockingFlag);
+  if (blocked && p.action !== 'override') return { ok: false, text: '⚠️ Draft has warnings — review it in the dashboard' };
+  setStatus(db, job.id, 'ready_to_apply', blocked ? 'telegram (override)' : 'telegram', {}, now);
   return { ok: true, text: '✅ Approved', jobId: job.id, next: 'ready' };
 }
 
@@ -144,6 +152,26 @@ export async function notifyDrafts(sender: DraftSender, chatId: string, db: Db, 
       catch (e) { console.error(`[telegram] CV send failed for job #${job.id}:`, e instanceof Error ? e.message : e); }
     }
     markDraftNotified(db, draft.id);
+  }
+  return sent;
+}
+
+/** /drafts: re-send the card of every draft waiting for a decision, with today's buttons (no CV: it was sent with the first card). */
+export async function resendDraftCards(sender: MessageSender, chatId: string, db: Db, opts: { delay?: (ms: number) => Promise<void> } = {}): Promise<number> {
+  const delay = opts.delay ?? sleep;
+  let sent = 0;
+  for (const job of listJobsByStatus(db, ['draft_ready'], 50)) {
+    const draft = latestDraft(db, job.id);
+    if (!draft) continue;
+    if (sent > 0) await delay(1000);
+    try {
+      await sender.sendMessage(chatId, formatDraftCard(job, draft), {
+        parse_mode: 'HTML', reply_markup: draftKeyboard(job.id, draft.flags.some(isBlockingFlag)), link_preview_options: { is_disabled: true },
+      });
+      sent++;
+    } catch (e) {
+      console.error(`[telegram] draft card resend failed for job #${job.id}:`, e instanceof Error ? e.message : e);
+    }
   }
   return sent;
 }

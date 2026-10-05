@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { openDb, insertJobs, listJobsByStatus, setStatus, insertDraft, getJob, latestDraft, type DraftInput } from '@autoapplier/core';
-import { cliDraftRefusal, formatDraftCard, formatDraftFailure, formatReadyMessages, handleDraftAction, notifyDraftFailures, notifyDrafts, parseDraftCallback, sendReady } from '../src/drafts';
+import { cliDraftRefusal, confirmOverrideKeyboard, draftKeyboard, formatDraftCard, formatDraftFailure, formatReadyMessages, handleDraftAction, notifyDraftFailures, notifyDrafts, parseDraftCallback, resendDraftCards, sendReady } from '../src/drafts';
 
 function setup(flags: string[] = [], coverLetter = 'I build <LLM> tools & agents.') {
   const db = openDb(':memory:');
@@ -250,3 +250,28 @@ describe('cliDraftRefusal', () => {
     expect(cliDraftRefusal(st)).toMatch(new RegExp(`is ${st}; cli draft only works for awaiting_review, shortlisted, draft_ready or draft_failed`)));
 });
 
+
+describe('approve anyway', () => {
+  const buttons = (kb: { inline_keyboard: { text: string; callback_data?: string }[][] }) => kb.inline_keyboard.flat().map((b) => b.callback_data);
+  it('blocked cards offer Approve anyway (aa:) instead of Approve; confirm step offers ao: and back', () => {
+    expect(buttons(draftKeyboard(5, false))).toEqual(['ap:5', 'sd:5']);
+    expect(buttons(draftKeyboard(5, true))).toEqual(['aa:5', 'sd:5']);
+    expect(buttons(confirmOverrideKeyboard(5))).toEqual(['ao:5', 'ab:5']);
+  });
+  it('ao: approves a blocked draft with an override note; refused from other chats or other statuses', () => {
+    expect(parseDraftCallback('ao:3')).toEqual({ action: 'override', jobId: 3 });
+    const { db, id } = setup(['unverified claim: Go']);
+    expect(handleDraftAction(db, '42', 7, `ao:${id}`)).toEqual({ ok: false, text: 'Not allowed' });
+    expect(handleDraftAction(db, '42', 42, `ao:${id}`)).toMatchObject({ ok: true, next: 'ready', jobId: id });
+    expect(getJob(db, id)!.status).toBe('ready_to_apply');
+    expect(handleDraftAction(db, '42', 42, `ao:${id}`)).toEqual({ ok: false, text: 'Already ready_to_apply' });
+  });
+  it('resendDraftCards re-sends every draft_ready card with the current keyboard', async () => {
+    const { db, id } = setup(['unverified claim: Go']);
+    const sent: { text: string; other: any }[] = [];
+    const n = await resendDraftCards({ sendMessage: async (_c: string, text: string, other: any) => { sent.push({ text, other }); } } as any, '42', db, { delay: async () => {} });
+    expect(n).toBe(1);
+    expect(sent[0]!.text).toContain('Voice &lt;AI&gt; Engineer');
+    expect(buttons(sent[0]!.other.reply_markup)).toEqual([`aa:${id}`, `sd:${id}`]);
+  });
+});

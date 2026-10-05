@@ -1,5 +1,5 @@
 import { Bot, GrammyError, InlineKeyboard } from 'grammy';
-import { handleDraftAction } from './drafts';
+import { confirmOverrideKeyboard, draftKeyboard, handleDraftAction, resendDraftCards } from './drafts';
 import { handleCancel, markAppliedKeyboard, parseSubmitCallback, type SubmitTapResult } from './submissions';
 import {
   formatComp, getJob, latestScore, listUnnotified, markNotified, setStatus,
@@ -115,6 +115,11 @@ export interface BotOptions {
 export function createBot(token: string, chatId: string, db: Db, onReady?: (jobId: number) => Promise<void>, opts: BotOptions = {}): Bot {
   const bot = new Bot(token);
   bot.command('start', (ctx) => ctx.reply(`Chat id: ${ctx.chat.id}\nPut it in .env as TELEGRAM_CHAT_ID.`));
+  bot.command('drafts', async (ctx) => {
+    if (String(ctx.chat.id) !== chatId) return;
+    const n = await resendDraftCards({ sendMessage: (c, t, o) => ctx.api.sendMessage(c, t, o as never) }, chatId, db);
+    if (!n) await ctx.reply('No drafts waiting for a decision.');
+  });
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data;
     const sc = parseSubmitCallback(data);
@@ -136,7 +141,16 @@ export function createBot(token: string, chatId: string, db: Db, onReady?: (jobI
       if (r.start) void r.start();
       return;
     }
-    if (/^(ap|sd|ma):/.test(data)) {
+    // ⚠️ Approve anyway: swap in the confirm step (nothing changes until ✅ Yes); ↩ Back restores the card's buttons.
+    if (/^(aa|ab):\d+$/.test(data)) {
+      if (String(ctx.chat?.id) !== chatId) { await ctx.answerCallbackQuery({ text: 'Not allowed' }); return; }
+      const jobId = Number(data.slice(3));
+      const confirm = data.startsWith('aa');
+      await ctx.answerCallbackQuery({ text: confirm ? 'Read the ⚠️ warnings on the card, then confirm' : '' });
+      await ctx.editMessageReplyMarkup({ reply_markup: confirm ? confirmOverrideKeyboard(jobId) : draftKeyboard(jobId, true) }).catch(() => {});
+      return;
+    }
+    if (/^(ap|ao|sd|ma):/.test(data)) {
       const r = handleDraftAction(db, chatId, ctx.chat?.id, data);
       await ctx.answerCallbackQuery({ text: r.text });
       if (r.ok) await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() }).catch(() => {});
