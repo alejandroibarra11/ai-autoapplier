@@ -443,6 +443,68 @@ describe('ashbyFiller', () => {
     await page.close();
   }, 60_000);
 
+  it('finds radio/checkbox groups whose name carries a per-render entry-id prefix (stale prefix in the plan)', async () => {
+    posted.length = 0;
+    const page = await open('ashby-entry-prefix.html');
+    const stale = 'eefc2703-90f3-4810-a1ce-5f6c7f90fe6c_';
+    const radio = `${stale}9ea8b1bb-a272-4352-9e26-50b387d8c025`;
+    const boxes = `${stale}c0ffee00-1111-4222-8333-944455556666`;
+    const p = P([
+      e('identity:email', 'jane@example.com'),
+      { ...e(radio, 'Job board', 'select', false, 'draft'), options: ["I'm a user", 'Job board', 'Other (please specify)'] },
+      e('f1d7e277-0c8f-4ff9-87d1-3d17914a8063', 'N/A', 'text', false, 'draft'),
+      e(boxes, 'TypeScript; Go', 'multiselect', false, 'draft'),
+      e(`${stale}deadbeef-0000-4000-8000-000000000000`, 'x', 'select', false, 'draft'), // no such field path: notFound
+    ]);
+    const r = await ashbyFiller.fill(page, p);
+    expect(r.failed).toEqual([]);
+    expect(r.notFound).toEqual([`${stale}deadbeef-0000-4000-8000-000000000000`]);
+    expect(r.filled).toEqual(expect.arrayContaining([radio, boxes, 'f1d7e277-0c8f-4ff9-87d1-3d17914a8063']));
+    const checked = await page.locator('[data-field-path="9ea8b1bb-a272-4352-9e26-50b387d8c025"] input[type=radio]').evaluateAll((els) => els.map((x) => (x as HTMLInputElement).checked));
+    expect(checked).toEqual([false, true, false]);
+    const ticked = await page.locator('[data-field-path="c0ffee00-1111-4222-8333-944455556666"] input[type=checkbox]').evaluateAll((els) => els.map((x) => (x as HTMLInputElement).checked));
+    expect(ticked).toEqual([true, false, true]);
+    expect(allSorted(r)).toEqual(p.entries.map((x) => x.fieldId).sort());
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it('flags required Ashby entries with no value, including an unnamed combobox and a radio group without required attributes', async () => {
+    const page = await open('ashby-entry-prefix.html');
+    const r = await ashbyFiller.fill(page, P([e('identity:email', 'jane@example.com')]));
+    expect(r.requiredEmpty).toEqual(expect.arrayContaining(['Location', 'How did you hear about Acme?']));
+    expect(r.requiredEmpty).not.toContain('Email');
+    expect(r.requiredEmpty).not.toContain('If other, please specify below');
+    await page.close();
+  }, 60_000);
+
+  it('fills a custom country-type location combobox with the profile country (exact option, read back)', async () => {
+    posted.length = 0;
+    const page = await open('ashby-entry-prefix.html');
+    const radio = 'eefc2703-90f3-4810-a1ce-5f6c7f90fe6c_9ea8b1bb-a272-4352-9e26-50b387d8c025';
+    const p = P([e('identity:email', 'jane@example.com'), e('identity:country', 'Mexico'), e('identity:location', 'Guadalajara, Mexico'), e(radio, 'Job board', 'select', false, 'draft')]);
+    const r = await ashbyFiller.fill(page, p);
+    expect(r.filled).toEqual(expect.arrayContaining(['identity:country', radio]));
+    expect(r.notFound).toEqual(['identity:location']); // the one place field belongs to identity:country
+    expect(r.failed).toEqual([]);
+    expect(await page.inputValue('[data-field-path="6f1b584f-ba7d-47eb-a987-ae7e13a9c5d3"] input[role=combobox]')).toBe('Mexico');
+    expect(r.requiredEmpty).toEqual([]);
+    expect(allSorted(r)).toEqual(p.entries.map((x) => x.fieldId).sort());
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it('leaves the country combobox failed (and required-empty) when no option matches exactly', async () => {
+    posted.length = 0;
+    const page = await open('ashby-entry-prefix.html');
+    const r = await ashbyFiller.fill(page, P([e('identity:country', 'Peru'), e('identity:location', 'Lima, Peru')]));
+    expect(r.failed).toEqual(['identity:country']);
+    expect(await page.inputValue('[data-field-path="6f1b584f-ba7d-47eb-a987-ae7e13a9c5d3"] input[role=combobox]')).toBe('');
+    expect(r.requiredEmpty).toContain('Location');
+    expect(posted).toEqual([]);
+    await page.close();
+  }, 60_000);
+
   it('reports a missing planned field and unanswered required yes/no', async () => {
     const page = await open('ashby-form.html');
     const r = await ashbyFiller.fill(page, P([e('identity:email', 'jane@example.com'), e('zz99', 'x', 'text', true, 'draft')]));
