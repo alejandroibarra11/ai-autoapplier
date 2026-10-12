@@ -28,3 +28,7 @@ output/
 .superpowers/
 *.tsbuildinfo
 .worktrees/
+
+# local handoff notes (personal state)
+HANDOFF.md
+.claude/
